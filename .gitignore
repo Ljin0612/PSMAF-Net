@@ -21,6 +21,8 @@ outputs/
 output/
 experiments/
 logs/
+*.log
+*.csv
 wandb/
 tensorboard/
 checkpoints/
@@ -37,10 +39,17 @@ work_dirs/
 *.pkl
 *.pickle
 
-# Datasets and generated data
+# Datasets: never commit raw or processed dataset files
 data/
-datasets/raw/
-datasets/processed/
+/datasets/**
+
+# Keep lightweight dataset metadata if needed
+!/datasets/
+!/datasets/**/
+!/datasets/**/README.md
+!/datasets/**/.gitkeep
+!/datasets/**/splits/
+!/datasets/**/splits/*.txt
 
 # System/editor files
 .DS_Store
