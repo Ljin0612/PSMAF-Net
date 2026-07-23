@@ -35,6 +35,28 @@ Not included yet:
 - Learning rate schedule: Poly
 - `ignore_index`: 255
 
+## MSRS expected layout
+
+The MSRS infrared config follows the bundled original UNIV MMSegmentation MSRS
+layout:
+
+```text
+MSRS/
+├── images/
+│   ├── training/
+│   └── validation/
+└── annotations/
+    ├── training/
+    └── validation/
+```
+
+`segmentation/configs/msrs_ir_upernet_univ.yaml` does not use `masks/`,
+`splits/train.txt`, or `splits/test.txt`. The original UNIV MMSegmentation base
+config uses the MSRS `validation` directories for both validation and test.
+
+Current segmentation work only establishes the config, checker, and entry
+points. Full MMSegmentation training integration remains future work.
+
 ## Files
 
 - `configs/msrs_ir_upernet_univ.yaml`: MSRS infrared segmentation entry config.
@@ -47,14 +69,12 @@ Not included yet:
 
 ## Example commands
 
-Check a prepared dataset layout:
+Check a prepared MSRS dataset layout:
 
 ```bash
 python segmentation/scripts/check_seg_dataset.py \
-  --root /path/to/MSRS-IR \
-  --images images \
-  --masks masks \
-  --split splits/train.txt
+  --config segmentation/configs/msrs_ir_upernet_univ.yaml \
+  --data-root /path/to/MSRS
 ```
 
 Inspect the future training entry point without launching training:
@@ -62,7 +82,7 @@ Inspect the future training entry point without launching training:
 ```bash
 python segmentation/scripts/train_upernet_univ.py \
   --config segmentation/configs/msrs_ir_upernet_univ.yaml \
-  --data-root /path/to/MSRS-IR \
+  --data-root /path/to/MSRS \
   --work-dir outputs/segmentation/msrs_ir_upernet_univ
 ```
 
@@ -71,7 +91,7 @@ Inspect the future evaluation entry point:
 ```bash
 python segmentation/scripts/eval_upernet_univ.py \
   --config segmentation/configs/msrs_ir_upernet_univ.yaml \
-  --data-root /path/to/MSRS-IR \
+  --data-root /path/to/MSRS \
   --checkpoint /path/to/checkpoint.pth \
-  --split splits/test.txt
+  --split test
 ```
