@@ -1,13 +1,12 @@
 name: psmaf-net
 channels:
   - pytorch
+  - nvidia
   - conda-forge
 dependencies:
+  # Original UNIV README records python=3.6. This project keeps a modern
+  # top-level environment while preserving original package pins in requirements.txt.
   - python=3.10
   - pip
-  - numpy
-  - pyyaml
-  - pytorch
-  - torchvision
   - pip:
       - -r requirements.txt
