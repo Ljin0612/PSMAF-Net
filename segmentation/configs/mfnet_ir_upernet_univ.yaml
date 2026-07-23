@@ -1,0 +1,6 @@
+# Initial MFNet infrared UPerNet + UNIV configuration placeholder.
+dataset: MFNet
+modality: infrared
+model: upernet
+backbone: UNIV
+artifacts: ignored

@@ -1,0 +1,6 @@
+# Initial MSRS infrared UPerNet + UNIV configuration placeholder.
+dataset: MSRS
+modality: infrared
+model: upernet
+backbone: UNIV
+artifacts: ignored

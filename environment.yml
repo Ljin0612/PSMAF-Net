@@ -1,0 +1,13 @@
+name: psmaf-net
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pyyaml
+  - pytorch
+  - torchvision
+  - pip:
+      - -r requirements.txt
