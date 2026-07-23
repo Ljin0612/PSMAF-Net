@@ -1,7 +1,16 @@
 # Segmentation plan
 
-The segmentation baseline target is to align with the original UNIV downstream
-route: a UNIV backbone feeding a UPerNet head through MMSegmentation.
+The segmentation validation route for PSMAF-Net uses a UNIV-based upstream
+feature extractor with a UPerNet head implemented through MMSegmentation.
+
+## Mainline route
+
+- Import and reproduce the original UNIV backbone first.
+- Add the PSMAF upstream fusion module on top of the reproduced UNIV baseline.
+- Export the fused upstream features to UPerNet through MMSegmentation configs
+  and training scripts.
+- Keep segmentation as a downstream validation task for the upstream PSMAF-Net
+  design rather than as a separate segmentation-first architecture.
 
 ## Current stage
 
