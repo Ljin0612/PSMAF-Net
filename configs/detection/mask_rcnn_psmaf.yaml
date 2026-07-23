@@ -1,0 +1,9 @@
+# Placeholder config for PSMAF-Net downstream object detection.
+# Route: Mask R-CNN / Detectron2, matching the original UNIV downstream design.
+MODEL:
+  META_ARCHITECTURE: GeneralizedRCNN
+  BACKBONE:
+    NAME: PSMAF_UNIV_Backbone_PLACEHOLDER
+DATASETS:
+  TRAIN: []
+  TEST: []

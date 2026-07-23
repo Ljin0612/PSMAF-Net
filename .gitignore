@@ -216,3 +216,20 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# PSMAF-Net research artifacts
+*.pth
+*.pt
+*.ckpt
+*.onnx
+runs/
+results/
+logs/
+weights/
+checkpoints/
+outputs/
+wandb/
+mlruns/
+data/
+datasets/
+*.csv
