@@ -1,4 +1,32 @@
-numpy
-pyyaml
-torch
-torchvision
+# PSMAF-Net dependency entry point.
+# Keep versions close to the bundled original UNIV requirements when available.
+# The original UNIV README also documents: conda create -n UNIV python=3.6
+
+# Core UNIV versions recorded in third_party/UNIV/requirements.txt
+numpy==1.23.5
+opencv-python==4.10.0.84
+timm==1.0.12
+torch==2.4.1
+torchvision==0.19.1
+mmengine==0.10.5
+
+# Common utilities used by UNIV and local scaffold scripts
+PyYAML==6.0.2
+packaging==24.2
+pillow==10.4.0
+scipy==1.10.1
+scikit-image==0.21.0
+tqdm==4.67.1
+
+# Downstream framework entry points.
+# Install the wheel/build matching your CUDA, PyTorch, and platform.
+# Detectron2 is intentionally not pinned here because official installation
+# commonly depends on a matching custom wheel or source build.
+# See: https://detectron2.readthedocs.io/tutorials/install.html
+# detectron2
+
+# MMSegmentation imports as `mmseg`. The bundled original UNIV SEG code uses
+# the legacy mmcv.runner/mmcv.parallel APIs, so choose an mmcv/mmsegmentation
+# combination compatible with that code path rather than blindly upgrading.
+# mmcv
+# mmsegmentation
