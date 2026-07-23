@@ -22,6 +22,8 @@ The baseline experiment metadata is stored in
 
 - Dataset: M3FD-IR
 - Modality: Infrared
+- Training images: 3360
+- Testing images: 840
 - Head: Mask R-CNN
 - Input resolution: 1024 x 1024
 - Fine-tuning steps: 85k
@@ -47,7 +49,8 @@ Use the lightweight checker before attempting training or evaluation:
 ```bash
 python detection/scripts/check_m3fd_detection.py \
   --dataset-root /path/to/M3FD-IR \
-  --split train
+  --split train \
+  --require-official-count
 ```
 
 By default the checker expects:
@@ -65,15 +68,17 @@ uses a different convention.
 
 ## Training and evaluation entry points
 
-The current train/eval scripts are placeholders by design. They validate their
-CLI arguments, print the intended experiment metadata, and stop before launching
-training or evaluation.
+The current train/eval scripts are runnable scaffold entry points. They validate
+local paths, print the intended experiment metadata, can emit a reviewable
+Detectron2 config fragment, and stop before launching unverified training or
+evaluation.
 
 ```bash
 python detection/scripts/train_m3fd_maskrcnn_univ.py \
   --config detection/configs/m3fd_ir_maskrcnn_univ.yaml \
   --dataset-root /path/to/M3FD-IR \
-  --output-dir outputs/detection/m3fd_ir_maskrcnn_univ
+  --output-dir outputs/detection/m3fd_ir_maskrcnn_univ \
+  --emit-detectron2-config /tmp/m3fd_ir_maskrcnn_univ.detectron2.yaml
 
 python detection/scripts/eval_m3fd_maskrcnn_univ.py \
   --config detection/configs/m3fd_ir_maskrcnn_univ.yaml \

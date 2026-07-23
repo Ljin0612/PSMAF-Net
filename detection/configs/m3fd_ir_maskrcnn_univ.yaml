@@ -11,10 +11,15 @@ experiment: m3fd_ir_maskrcnn_univ
 dataset:
   name: M3FD-IR
   modality: Infrared
+  splits:
+    train_images: 3360
+    test_images: 840
   expected_layout:
     images_dir: images
     annotations_dir: annotations
     splits_dir: splits
+    train_split_file: train.txt
+    test_split_file: test.txt
 
 model:
   backbone: UNIV
@@ -36,6 +41,7 @@ training:
 status:
   complete_training_config: false
   note: >-
-    Entry-point metadata only. Detectron2 dataset registration, Mask R-CNN model
-    construction, UNIV checkpoint loading, and verified train/eval loops remain
-    TODO.
+    Runnable scaffold only. Scripts validate local paths, expose the official
+    M3FD-IR Mask R-CNN hyperparameters, and can emit a Detectron2 config
+    fragment for review. Dataset registration, model construction, checkpoint
+    conversion/loading, and verified train/eval loops remain TODO.
