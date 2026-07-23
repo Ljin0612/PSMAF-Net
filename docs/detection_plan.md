@@ -1,27 +1,31 @@
 # Detection plan
 
-The detection validation route for PSMAF-Net uses a UNIV-based upstream feature
-extractor together with Mask R-CNN implemented through Detectron2.
+The detection route is split into three explicit steps so that dataset handling, the baseline detector, the UNIV backbone, and PSMAF-Net fusion can be validated independently.
 
-## Mainline route
+## Step 1: M3FD-IR standard Mask R-CNN smoke test
 
-- Import and reproduce the original UNIV backbone first.
-- Add the PSMAF upstream fusion module on top of the reproduced UNIV baseline.
-- Export the fused upstream features to a Detectron2 Mask R-CNN detection head.
-- Keep detection as a downstream validation task for the upstream PSMAF-Net
-  design rather than as a separate detector-first architecture.
+- Validate the local M3FD RGB-T dataset layout (`ir/`, `vi/`, `labels/`, `meta/`).
+- Convert M3FD infrared YOLO labels to COCO-style annotations for Detectron2.
+- Register the converted COCO datasets with Detectron2.
+- Run a small standard Mask R-CNN R50-FPN smoke test to verify the detection stack.
+- This step is infrastructure only; it does not claim UNIV or PSMAF integration.
+
+## Step 2: UNIV-original backbone + Mask R-CNN
+
+- Reproduce or load the original UNIV backbone in a Detectron2-compatible wrapper.
+- Replace the standard R50-FPN backbone only after the Step 1 smoke test is stable.
+- Keep dataset registration and COCO conversion identical to Step 1 for controlled comparison.
+
+## Step 3: PSMAF-Net RGB-IR pseudo-semantic guided detection
+
+- Extend the pipeline from IR-only samples to paired RGB-IR inputs.
+- Add PSMAF-Net pseudo-semantic guidance and fusion modules in the Detectron2 model path.
+- Compare the PSMAF variant against both the standard Mask R-CNN baseline and the UNIV-original backbone baseline.
+
+## M3FD evaluation role
+
+M3FD is used for complex-environment detection evaluation. After the main smoke and backbone integrations are stable, the evaluation plan should include subset analysis for day/night scenes, degraded visible imagery, small objects, crowded scenes, and other challenging conditions.
 
 ## Non-mainline choices
 
-YOLO-style adapters are not the mainline route for this repository. Historical
-or exploratory YOLO-style adapter experiments are not used as the formal
-baseline for the PSMAF-Net detection task.
-
-
-## Upstream public repository boundary
-
-The detection route follows the paper-facing Mask R-CNN / Detectron2 setting.
-The public upstream UNIV repository mainly exposes pretraining and semantic
-segmentation entry points. Detectron2 integration in PSMAF-Net remains a future
-adapter implementation, so the current detection files are intentionally limited
-to entry points, metadata, validation helpers, and TODOs.
+YOLO-style adapters are not the mainline route for this repository. Historical or exploratory YOLO-style adapter experiments are not used as the formal baseline for the PSMAF-Net detection task.

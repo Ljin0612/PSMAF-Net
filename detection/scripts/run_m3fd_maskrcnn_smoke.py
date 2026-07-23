@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Dry-run or smoke-run an M3FD-IR Detectron2 Mask R-CNN pipeline."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from check_m3fd_detection import check_dataset
+from make_m3fd_ir_coco import convert
+from make_m3fd_maskrcnn_config import build_config
+from register_m3fd_detectron2 import register_m3fd_coco
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run an M3FD-IR Mask R-CNN smoke pipeline.")
+    parser.add_argument("--dataset-root", required=True, type=Path)
+    parser.add_argument("--work-dir", required=True, type=Path)
+    parser.add_argument("--layout", default="m3fd-rgbt", choices=("m3fd-rgbt",))
+    parser.add_argument("--modality", default="ir", choices=("ir",))
+    parser.add_argument("--train-split", default="train")
+    parser.add_argument("--test-split", default="test")
+    parser.add_argument("--max-iter", type=int, default=10)
+    parser.add_argument("--ims-per-batch", type=int, default=1)
+    parser.add_argument("--input-size", type=int, default=1024)
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args()
+
+
+def print_plan(args: argparse.Namespace, train_json: Path, test_json: Path) -> None:
+    print("This is a Detectron2 Mask R-CNN pipeline smoke test. UNIV backbone integration is the next step.")
+    print("planned steps:")
+    print(f"  1. check dataset root: {args.dataset_root}")
+    print(f"  2. convert {args.train_split} split to COCO: {train_json}")
+    print(f"  3. convert {args.test_split} split to COCO: {test_json}")
+    print("  4. register m3fd_ir_train and m3fd_ir_test with Detectron2")
+    print("  5. run standard Mask R-CNN R50-FPN smoke training")
+
+
+def main() -> int:
+    args = parse_args()
+    work_dir = args.work_dir.expanduser().resolve()
+    train_json = work_dir / "coco" / f"m3fd_ir_{args.train_split}.json"
+    test_json = work_dir / "coco" / f"m3fd_ir_{args.test_split}.json"
+    config_json = work_dir / "m3fd_ir_maskrcnn_smoke_config.json"
+    print_plan(args, train_json, test_json)
+    if args.dry_run:
+        print("dry_run: no files generated and no training started")
+        return 0
+
+    for split in (args.train_split, args.test_split):
+        errors, warnings, count = check_dataset(args.dataset_root, args.layout, split)
+        print(f"dataset check split={split}: samples={count}")
+        for warning in warnings:
+            print(f"  warning: {warning}")
+        if errors:
+            print("status: dataset check failed")
+            for error in errors:
+                print(f"  - {error}")
+            return 1
+
+    train_stats = convert(args.dataset_root, args.train_split, train_json)
+    test_stats = convert(args.dataset_root, args.test_split, test_json)
+    print(f"train conversion: {train_stats}")
+    print(f"test conversion: {test_stats}")
+
+    config_args = argparse.Namespace(
+        train_json=str(train_json),
+        train_image_root=str(args.dataset_root.expanduser().resolve() / args.modality),
+        test_json=str(test_json),
+        test_image_root=str(args.dataset_root.expanduser().resolve() / args.modality),
+        output_dir=str(work_dir / "detectron2_output"),
+        num_classes=6,
+        max_iter=args.max_iter,
+        ims_per_batch=args.ims_per_batch,
+        base_lr=8e-5,
+        input_size=args.input_size,
+        weights=None,
+    )
+    config = build_config(config_args)
+    config_json.parent.mkdir(parents=True, exist_ok=True)
+    config_json.write_text(__import__("json").dumps(config, indent=2), encoding="utf-8")
+    print(f"runtime config: {config_json}")
+
+    try:
+        from detectron2 import model_zoo
+        from detectron2.config import get_cfg
+        from detectron2.engine import DefaultTrainer
+    except ImportError as exc:
+        print(f"missing: detectron2 ({exc})")
+        return 1
+
+    register_m3fd_coco("m3fd_ir_train", str(args.dataset_root.expanduser().resolve() / args.modality), str(train_json))
+    register_m3fd_coco("m3fd_ir_test", str(args.dataset_root.expanduser().resolve() / args.modality), str(test_json))
+
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file(config["model_zoo_config"]))
+    cfg.DATASETS.TRAIN = ("m3fd_ir_train",)
+    cfg.DATASETS.TEST = ("m3fd_ir_test",)
+    cfg.DATALOADER.NUM_WORKERS = 0
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = int(config["num_classes"])
+    cfg.SOLVER.IMS_PER_BATCH = int(config["ims_per_batch"])
+    cfg.SOLVER.BASE_LR = float(config["base_lr"])
+    cfg.SOLVER.MAX_ITER = int(config["max_iter"])
+    cfg.SOLVER.STEPS = []
+    cfg.INPUT.MIN_SIZE_TRAIN = (int(config["input_size"]),)
+    cfg.INPUT.MAX_SIZE_TRAIN = int(config["input_size"])
+    cfg.INPUT.MIN_SIZE_TEST = int(config["input_size"])
+    cfg.INPUT.MAX_SIZE_TEST = int(config["input_size"])
+    cfg.OUTPUT_DIR = str(work_dir / "detectron2_output")
+    if config["weights"]:
+        cfg.MODEL.WEIGHTS = str(config["weights"])
+    Path(cfg.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    trainer = DefaultTrainer(cfg)
+    trainer.resume_or_load(resume=False)
+    trainer.train()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
