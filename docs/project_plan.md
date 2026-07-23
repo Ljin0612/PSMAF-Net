@@ -1,5 +1,12 @@
 # PSMAF-Net project plan
 
+## Repository status
+
+This repository is the formal PSMAF-Net model repository and is the mainline
+location for current PSMAF-Net development. The legacy `Ljin0612/M3FD`
+repository is treated only as an old exploratory codebase and is no longer
+maintained as the main development line.
+
 ## Environment objective
 
 PSMAF-Net keeps one lightweight dependency entry point around the bundled
