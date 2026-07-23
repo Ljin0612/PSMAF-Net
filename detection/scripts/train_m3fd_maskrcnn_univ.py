@@ -1,0 +1,9 @@
+"""Train M3FD Mask R-CNN with UNIV backbone placeholder."""
+
+
+def main() -> None:
+    print("M3FD Mask R-CNN UNIV training placeholder")
+
+
+if __name__ == "__main__":
+    main()

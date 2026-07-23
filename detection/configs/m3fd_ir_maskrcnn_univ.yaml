@@ -1,0 +1,6 @@
+# Initial M3FD infrared Mask R-CNN + UNIV configuration placeholder.
+dataset: M3FD
+modality: infrared
+model: mask_rcnn
+backbone: UNIV
+artifacts: ignored
