@@ -39,6 +39,19 @@ conservative:
 4. Treat environment checks as diagnostics. Missing optional dependencies should
    be printed as `missing` and should not stop the script.
 
+## Requirements layering
+
+- `third_party/UNIV/requirements.txt` is the complete official UNIV dependency
+  snapshot imported with the upstream source.
+- Top-level `requirements.txt` is the current lightweight PSMAF-Net entry point;
+  it prioritizes core dependencies and is not necessarily identical to a full
+  official UNIV pretraining environment.
+- To run complete official UNIV pretraining, start from
+  `third_party/UNIV/requirements.txt` and create a dedicated environment matched
+  to the server CUDA and PyTorch versions.
+- Do not blindly upgrade Detectron2, MMCV, or MMSegmentation; each must be
+  matched to the target CUDA/PyTorch runtime.
+
 ## Initial milestones
 
 ### Milestone 1: dependency entry points

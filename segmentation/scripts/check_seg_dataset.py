@@ -7,10 +7,12 @@ UNIV, or any training code.
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 from collections.abc import Iterable
 from pathlib import Path
 
-import yaml
+yaml = importlib.import_module("yaml") if importlib.util.find_spec("yaml") else None
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 ANNOTATION_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -41,6 +43,8 @@ def resolve_path(root: Path, path: str | Path) -> Path:
 
 
 def load_config(config_path: Path) -> dict:
+    if yaml is None:
+        raise ValueError("PyYAML is required to read segmentation YAML configs; install pyyaml or run --help only")
     if not config_path.is_file():
         raise ValueError(f"config file does not exist: {config_path}")
     with config_path.open("r", encoding="utf-8") as handle:

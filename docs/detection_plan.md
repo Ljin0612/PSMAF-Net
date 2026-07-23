@@ -16,3 +16,12 @@ extractor together with Mask R-CNN implemented through Detectron2.
 YOLO-style adapters are not the mainline route for this repository. Historical
 or exploratory YOLO-style adapter experiments are not used as the formal
 baseline for the PSMAF-Net detection task.
+
+
+## Upstream public repository boundary
+
+The detection route follows the paper-facing Mask R-CNN / Detectron2 setting.
+The public upstream UNIV repository mainly exposes pretraining and semantic
+segmentation entry points. Detectron2 integration in PSMAF-Net remains a future
+adapter implementation, so the current detection files are intentionally limited
+to entry points, metadata, validation helpers, and TODOs.
