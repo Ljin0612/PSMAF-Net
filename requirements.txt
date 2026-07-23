@@ -2,3 +2,4 @@ numpy
 pyyaml
 torch
 torchvision
+peft==0.13.0
