@@ -1,6 +1,38 @@
-# Initial MFNet infrared UPerNet + UNIV configuration placeholder.
-dataset: MFNet
-modality: infrared
-model: upernet
-backbone: UNIV
-artifacts: ignored
+# MFNet infrared semantic segmentation entry config for UPerNet + UNIV.
+# This records the original UNIV downstream-task setting. It is intentionally
+# framework-neutral until the MMSegmentation adapter is implemented.
+
+dataset:
+  name: MFNet-IR
+  modality: infrared
+  task: semantic_segmentation
+  counts:
+    training_images: 1569
+    validation_images: 392
+    testing_images: 393
+  paths:
+    root: null
+    images: images
+    masks: masks
+    train_split: splits/train.txt
+    val_split: splits/val.txt
+    test_split: splits/test.txt
+
+model:
+  backbone: UNIV
+  head: UperNet
+  input_resolution: [512, 512]
+
+training:
+  optimizer: AdamW
+  weight_decay: 0.05
+  lr_schedule: Poly
+  ignore_index: 255
+
+integration:
+  target_framework: MMSegmentation
+  status: entrypoint_only
+  todo:
+    - Convert this metadata into an MMSegmentation config.
+    - Register the MFNet-IR dataset adapter.
+    - Wire UNIV checkpoint loading into the UPerNet backbone.
