@@ -15,6 +15,7 @@ https://github.com/fangyuanmao/UNIV.git
 ## Import policy
 
 - `third_party/UNIV` stores the upstream UNIV source.
+- `third_party/UNIV/datasets/` is an upstream Python source package and must not be ignored in source audits; distinguish it from real dataset artifacts such as repository-root `/datasets/` or `/data/`.
 - Do not mix PSMAF-Net research modules into `third_party/UNIV`.
 - PSMAF-Net modifications should be implemented under `core/psmaf`, `detection`, `segmentation`, or `tools`.
 - If upstream UNIV code must be patched for compatibility, document the reason and patch in `docs/univ_audit_report.md`.
