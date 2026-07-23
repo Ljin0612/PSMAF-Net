@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from m3fd_maskrcnn_scaffold import load_experiment
+
 
 DEFAULT_CONFIG = Path("detection/configs/m3fd_ir_maskrcnn_univ.yaml")
 
@@ -42,12 +44,17 @@ def main() -> int:
         print(f"Checkpoint file does not exist: {checkpoint}")
         return 1
 
+    experiment, _ = load_experiment(config)
+
     print("M3FD-IR Mask R-CNN + UNIV evaluation entry point")
     print(f"  config: {config}")
     print(f"  dataset_root: {dataset_root}")
     print(f"  checkpoint: {checkpoint}")
     print(f"  output_dir: {output_dir}")
     print(f"  split: {args.split}")
+    print(f"  expected_test_images: {experiment.test_images}")
+    print(f"  head: {experiment.head}")
+    print(f"  framework: {experiment.framework}")
     print("TODO: integrate Detectron2 dataset registration, evaluator construction,")
     print("      checkpoint loading, metric computation, and result serialization.")
     return 0
