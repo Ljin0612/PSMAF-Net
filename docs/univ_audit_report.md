@@ -45,20 +45,24 @@ The official dependency snapshot includes PyTorch and CUDA-wheel pins (`torch==2
 
 ## Comparison method
 
-The audit cloned the official repository to `/tmp/UNIV-official` with depth 1, copied both trees to filtered temporary directories, and compared them with `git diff --no-index --name-status`. The comparison ignored `.git/`, `__pycache__/`, `*.pyc`, `data/`, `checkpoints/`, `outputs/`, `runs/`, `results/`, `logs/`, `*.pth`, `*.pt`, and `*.ckpt`. It intentionally did **not** ignore `third_party/UNIV/datasets/`, because that path is an upstream Python source package, not a dataset artifact. Root-level `/datasets/` and `/data/` remain dataset-artifact paths for this repository and must not be conflated with vendored source packages.
+The audit re-cloned the official repository with `git clone --depth 1 https://github.com/fangyuanmao/UNIV.git /tmp/UNIV-official`, recorded `git -C /tmp/UNIV-official rev-parse HEAD`, and compared `/tmp/UNIV-official/` directly with `third_party/UNIV/` using `diff -qr`. The comparison ignored only source-control caches, Python bytecode caches, real data, and training artifacts: `.git/`, `__pycache__/`, `*.pyc`, `/data/`, root-level or temporary dataset-artifact `/datasets/` outside the vendored UNIV source package, `checkpoints/`, `outputs/`, `runs/`, `results/`, `logs/`, `*.pth`, `*.pt`, `*.ckpt`, and `*.safetensors`. The audit explicitly included the upstream source package `third_party/UNIV/datasets/`; it is not a dataset artifact and must not be excluded from UNIV source audits.
 
 ## Comparison conclusion
 
-`third_party/UNIV` matches the official UNIV source at commit `dd38740a02e2c75308697f2d15361cbacb7ee7c5` for the audited upstream files. The only filtered-tree difference is an additional repository-local documentation file, `third_party/UNIV/INTEGRATION.md`, which does not modify upstream source behavior.
+`third_party/UNIV` matches the official UNIV source at commit `dd38740a02e2c75308697f2d15361cbacb7ee7c5` for all required upstream source paths, including `datasets/`, `loss/`, `models/`, `utils/`, `SEG/`, `configs/`, `pretrain_mcmae.py`, `run.sh`, `requirements.txt`, and `README.md`. The only filtered-tree difference is an additional repository-local documentation file, `third_party/UNIV/INTEGRATION.md`, which does not modify upstream source behavior.
 
-## Consistent key files
+## Consistent key paths
 
+- `third_party/UNIV/datasets/`
+- `third_party/UNIV/loss/`
+- `third_party/UNIV/models/`
+- `third_party/UNIV/utils/`
+- `third_party/UNIV/SEG/`
+- `third_party/UNIV/configs/`
 - `third_party/UNIV/README.md`
 - `third_party/UNIV/requirements.txt`
 - `third_party/UNIV/pretrain_mcmae.py`
-- `third_party/UNIV/datasets/co_data_augmentation.py`
-- `third_party/UNIV/datasets/datasets.py`
-- `third_party/UNIV/SEG/MCMAE_SEG/configs/_base_/datasets/msrs.py`
+- `third_party/UNIV/run.sh`
 
 ## Inconsistent files
 
