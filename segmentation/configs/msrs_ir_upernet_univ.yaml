@@ -1,31 +1,42 @@
 # MSRS infrared semantic segmentation entry config for UPerNet + UNIV.
-# This records the original UNIV downstream-task setting. It is intentionally
-# framework-neutral until the MMSegmentation adapter is implemented.
+# This records the bundled original UNIV/MMSegmentation downstream-task layout.
+# It is intentionally framework-neutral until the MMSegmentation adapter is implemented.
 
 dataset:
   name: MSRS-IR
-  modality: infrared
   task: semantic_segmentation
+  modality: infrared
+  data_root: /path/to/MSRS
   counts:
     training_images: 1083
+    validation_images: 361
     testing_images: 361
-  paths:
-    root: null
-    images: images
-    masks: masks
-    train_split: splits/train.txt
-    test_split: splits/test.txt
+  train:
+    img_dir: images/training
+    ann_dir: annotations/training
+  val:
+    img_dir: images/validation
+    ann_dir: annotations/validation
+  test:
+    img_dir: images/validation
+    ann_dir: annotations/validation
 
 model:
   backbone: UNIV
   head: UperNet
-  input_resolution: [512, 512]
 
 training:
+  input_resolution: [512, 512]
   optimizer: AdamW
+  base_lr: 0.0001
   weight_decay: 0.05
-  lr_schedule: Poly
+  lr_schedule: poly
   ignore_index: 255
+
+notes:
+  - This config follows the bundled original UNIV/MMSegmentation MSRS layout.
+  - MSRS validation directories are used for both val and test, matching the bundled UNIV base config.
+  - This config does not use masks/ or split txt files.
 
 integration:
   target_framework: MMSegmentation
