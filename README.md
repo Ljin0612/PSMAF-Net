@@ -11,7 +11,7 @@ This is the initial structure of the formal research repository. Implementation,
 - `core/`: Core PSMAF method components.
 - `detection/`: Detection configurations, dataset notes, adapters, and scripts.
 - `segmentation/`: Segmentation configurations, dataset notes, adapters, and scripts.
-- `third_party/UNIV/`: Placeholder for UNIV integration resources.
+- `third_party/UNIV/`: Vendored official UNIV source used as the upstream baseline. See `docs/univ_source.md` for provenance.
 - `docs/`: Project plans, design notes, and baseline result templates.
 - `tools/`: General repository utilities.
 

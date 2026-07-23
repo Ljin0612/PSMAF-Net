@@ -16,8 +16,11 @@ Planned steps:
   1. Load and validate the YAML metadata config.
   2. Convert the metadata into an MMSegmentation UPerNet config.
   3. Register the target infrared segmentation dataset adapter and split.
-  4. Load the UNIV/UPerNet checkpoint.
-  5. Delegate evaluation and metric reporting to the MMSegmentation runner.
+  4. For evaluation, read the selected split directories from config
+     dataset.<split>.img_dir and dataset.<split>.ann_dir instead of using
+     legacy split files.
+  5. Load the UNIV/UPerNet checkpoint.
+  6. Delegate evaluation and metric reporting to the MMSegmentation runner.
 """.strip()
 
 
@@ -39,9 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--split",
-        required=True,
-        type=Path,
-        help="Evaluation split file, relative to data root unless absolute.",
+        choices=("train", "val", "test"),
+        default="test",
+        help="Dataset split name for future directory-based evaluation.",
     )
     parser.add_argument(
         "--output-dir",

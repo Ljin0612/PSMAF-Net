@@ -1,6 +1,7 @@
 # MFNet infrared semantic segmentation entry config for UPerNet + UNIV.
-# This records the original UNIV downstream-task setting. It is intentionally
-# framework-neutral until the MMSegmentation adapter is implemented.
+# The public UNIV repository does not define a verified MFNet directory layout
+# in this scaffold. Keep paths as TODO metadata until the real local dataset
+# schema is confirmed.
 
 dataset:
   name: MFNet-IR
@@ -10,13 +11,16 @@ dataset:
     training_images: 1569
     validation_images: 392
     testing_images: 393
-  paths:
-    root: null
-    images: images
-    masks: masks
-    train_split: splits/train.txt
-    val_split: splits/val.txt
-    test_split: splits/test.txt
+  data_root: null
+  train:
+    img_dir: TODO_CONFIRM_MFNET_TRAIN_IMAGES
+    ann_dir: TODO_CONFIRM_MFNET_TRAIN_ANNOTATIONS
+  val:
+    img_dir: TODO_CONFIRM_MFNET_VAL_IMAGES
+    ann_dir: TODO_CONFIRM_MFNET_VAL_ANNOTATIONS
+  test:
+    img_dir: TODO_CONFIRM_MFNET_TEST_IMAGES
+    ann_dir: TODO_CONFIRM_MFNET_TEST_ANNOTATIONS
 
 model:
   backbone: UNIV
@@ -33,6 +37,7 @@ integration:
   target_framework: MMSegmentation
   status: entrypoint_only
   todo:
+    - Confirm the real MFNet-IR local directory layout before wiring paths.
     - Convert this metadata into an MMSegmentation config.
     - Register the MFNet-IR dataset adapter.
     - Wire UNIV checkpoint loading into the UPerNet backbone.
