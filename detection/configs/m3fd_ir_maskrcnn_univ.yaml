@@ -1,6 +1,41 @@
-# Initial M3FD infrared Mask R-CNN + UNIV configuration placeholder.
-dataset: M3FD
-modality: infrared
-model: mask_rcnn
-backbone: UNIV
-artifacts: ignored
+# M3FD-IR Mask R-CNN + UNIV detection entry configuration.
+#
+# This file records the original UNIV-style downstream detection setting used as
+# the target for future Detectron2 integration. It is intentionally lightweight:
+# scripts in detection/scripts/ read it as experiment metadata, not as a complete
+# Detectron2 config.
+
+task: object_detection
+experiment: m3fd_ir_maskrcnn_univ
+
+dataset:
+  name: M3FD-IR
+  modality: Infrared
+  expected_layout:
+    images_dir: images
+    annotations_dir: annotations
+    splits_dir: splits
+
+model:
+  backbone: UNIV
+  head: MaskRCNN
+  framework: Detectron2
+
+input:
+  resolution:
+    height: 1024
+    width: 1024
+
+training:
+  fine_tuning_steps: 85000
+  optimizer: AdamW
+  base_learning_rate: 8.0e-5
+  weight_decay: 0.1
+  batch_size: 4
+
+status:
+  complete_training_config: false
+  note: >-
+    Entry-point metadata only. Detectron2 dataset registration, Mask R-CNN model
+    construction, UNIV checkpoint loading, and verified train/eval loops remain
+    TODO.
