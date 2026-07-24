@@ -188,6 +188,27 @@ def test_smoke_runner_explicitly_disables_mask_head():
     assert "mask head must stay disabled" in source
 
 
+def test_smoke_runner_uses_train_return_for_final_eval_without_duplicate_test_call():
+    source = (SCRIPTS_DIR / "run_m3fd_maskrcnn_smoke.py").read_text(encoding="utf-8")
+
+    train_call = "eval_results = trainer.train()"
+    assert train_call in source
+    assert "trainer_class.test(cfg, trainer.model)" not in source
+    assert "cfg.TEST.EVAL_PERIOD == 0" not in source
+    assert "bbox final evaluation results: {eval_results}" in source
+
+
+def test_smoke_runner_eval_period_zero_relies_on_default_trainer_final_eval():
+    source = (SCRIPTS_DIR / "run_m3fd_maskrcnn_smoke.py").read_text(encoding="utf-8")
+
+    assert "eval_period = 0 if eval_every_epochs == 0" in source
+    assert "cfg.TEST.EVAL_PERIOD = int(schedule.eval_period)" in source
+    assert source.index("eval_results = trainer.train()") > source.index(
+        "cfg.TEST.EVAL_PERIOD = int(schedule.eval_period)"
+    )
+    assert "if cfg.TEST.EVAL_PERIOD == 0" not in source
+
+
 def test_smoke_runner_builds_coco_bbox_evaluator():
     source = (SCRIPTS_DIR / "run_m3fd_maskrcnn_smoke.py").read_text(encoding="utf-8")
 

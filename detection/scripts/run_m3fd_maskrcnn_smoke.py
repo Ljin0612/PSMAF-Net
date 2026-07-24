@@ -275,10 +275,8 @@ def main() -> int:
     trainer_class = build_m3fd_smoke_trainer()
     trainer = trainer_class(cfg)
     trainer.resume_or_load(resume=False)
-    trainer.train()
-    if cfg.TEST.EVAL_PERIOD == 0:
-        eval_results = trainer_class.test(cfg, trainer.model)
-        print(f"bbox final evaluation results: {eval_results}")
+    eval_results = trainer.train()
+    print(f"bbox final evaluation results: {eval_results}")
     return 0
 
 
