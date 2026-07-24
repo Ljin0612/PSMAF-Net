@@ -1,14 +1,16 @@
-# M3FD-IR Detectron2 Mask R-CNN runbook
+# M3FD-IR Detectron2 bbox detection runbook
 
 ## Goal
 
+The current M3FD smoke pipeline is **bbox detection-only**. M3FD labels used by this pipeline provide detection boxes, not instance masks, so the smoke baseline deliberately avoids mask loss.
+
 The detection path is staged deliberately:
 
-1. Run an M3FD-IR Detectron2 standard Mask R-CNN smoke test.
-2. Integrate the original UNIV backbone with Mask R-CNN.
+1. Run an M3FD-IR Detectron2 standard Faster R-CNN R50-FPN bbox detection smoke test.
+2. Integrate the original UNIV backbone with a Detectron2 detector after the bbox smoke baseline is stable.
 3. Integrate PSMAF-Net RGB-IR pseudo-semantic guided detection.
 
-The current scripts only establish dataset checks, COCO conversion, Detectron2 import checks, runtime config metadata, dry-runs, and a minimal standard Mask R-CNN smoke-run entry point. They do **not** claim that the UNIV backbone or PSMAF fusion has already been connected to Detectron2.
+The current scripts only establish dataset checks, bbox-only COCO conversion, Detectron2 import checks, runtime config metadata, dry-runs, and a minimal standard Faster R-CNN smoke-run entry point. They do **not** claim that the UNIV backbone, PSMAF fusion, or a full paper-facing Mask R-CNN route has already been connected to Detectron2.
 
 ## Dataset layout A: M3FD RGB-T
 
@@ -68,6 +70,8 @@ python detection/scripts/check_m3fd_detection.py \
 
 Generate COCO-style annotations for the infrared training split. Write generated JSON under `outputs/detection/coco/` or another ignored work directory; do not commit generated annotations.
 
+The generated COCO JSON is **bbox-only**: annotations include `bbox`, `area`, `category_id`, `image_id`, and `iscrowd`, but do not include `segmentation` polygons or masks. Do not train mask loss on this JSON unless valid instance masks or documented segmentation annotations are explicitly provided.
+
 ```bash
 python detection/scripts/make_m3fd_ir_coco.py \
   --dataset-root /path/to/M3FD \
@@ -89,6 +93,8 @@ python detection/scripts/make_m3fd_ir_coco.py \
 ```
 
 ## Runtime config metadata
+
+The smoke config uses Detectron2 `COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml` and records `mask_on: false` / `annotation_type: bbox_only`.
 
 ```bash
 python detection/scripts/make_m3fd_maskrcnn_config.py \
@@ -116,7 +122,7 @@ python detection/scripts/run_m3fd_maskrcnn_smoke.py \
 
 ## Smoke-run
 
-Non-dry-run checks the dataset, converts train/test COCO JSON, registers Detectron2 datasets, and runs a minimal standard Mask R-CNN R50-FPN smoke training job when Detectron2 is installed:
+Non-dry-run checks the dataset, converts train/test bbox-only COCO JSON, registers Detectron2 datasets, disables `MODEL.MASK_ON`, and runs a minimal standard Faster R-CNN R50-FPN bbox detection smoke training job when Detectron2 is installed:
 
 ```bash
 python detection/scripts/run_m3fd_maskrcnn_smoke.py \
@@ -127,11 +133,14 @@ python detection/scripts/run_m3fd_maskrcnn_smoke.py \
   --input-size 1024
 ```
 
+Do **not** use `COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml` directly with the bbox-only M3FD JSON. If a future experiment uses that instance-segmentation config, it must either provide legal `segmentation` fields or explicitly set `MODEL.MASK_ON = False`.
+
 ## UNIV backbone integration TODO
 
-- Add a Detectron2 backbone adapter for the original UNIV model.
+- Add a Detectron2 backbone adapter for the original UNIV model after the bbox-only Faster R-CNN smoke baseline is stable.
 - Load validated UNIV checkpoints without changing detection dataset semantics.
-- Compare standard Mask R-CNN R50-FPN smoke metrics against the UNIV-backbone Mask R-CNN setting.
+- Compare the standard Faster R-CNN R50-FPN bbox smoke metrics against the UNIV-backbone detector setting.
+- Treat UNIV-original + Mask R-CNN / Detectron2 integration as the next stage, not the current smoke baseline.
 
 ## RGB-IR / pseudo-semantic guided detection TODO
 
