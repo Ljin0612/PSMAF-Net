@@ -89,6 +89,9 @@ def test_m3fd_ir_coco_converter_emits_bbox_only_metadata_and_annotations(tmp_pat
     assert coco["annotations"]
     assert "bbox" in coco["annotations"][0]
     assert "segmentation" not in coco["annotations"][0]
+    assert [category["id"] for category in coco["categories"]] == [1, 2, 3, 4, 5, 6]
+    assert [category["name"] for category in coco["categories"]] == ["people", "car", "bus", "motorcycle", "lamp", "truck"]
+    assert coco["annotations"][0]["category_id"] == 1
 
 
 def test_smoke_runner_explicitly_disables_mask_head():
@@ -98,3 +101,13 @@ def test_smoke_runner_explicitly_disables_mask_head():
     assert 'cfg.MODEL.MASK_ON = bool(config.get("mask_on", False))' in source
     assert "bbox-only," in source
     assert "mask head must stay disabled" in source
+
+
+def test_smoke_runner_builds_coco_bbox_evaluator():
+    source = (SCRIPTS_DIR / "run_m3fd_maskrcnn_smoke.py").read_text(encoding="utf-8")
+
+    assert "class M3FDBBoxSmokeTrainer(DefaultTrainer):" in source
+    assert "def build_evaluator" in source
+    assert "COCOEvaluator" in source
+    assert 'tasks=("bbox",)' in source
+    assert 'Path(cfg.OUTPUT_DIR).parent / "eval"' in source

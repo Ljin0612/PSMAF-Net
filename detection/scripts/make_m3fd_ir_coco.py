@@ -17,13 +17,14 @@ from typing import Any
 from check_m3fd_detection import IMAGE_EXTENSIONS, find_image, find_label, read_split
 
 CATEGORIES = [
-    {"id": 0, "name": "people"},
-    {"id": 1, "name": "car"},
-    {"id": 2, "name": "bus"},
-    {"id": 3, "name": "motorcycle"},
-    {"id": 4, "name": "lamp"},
-    {"id": 5, "name": "truck"},
+    {"id": 1, "name": "people"},
+    {"id": 2, "name": "car"},
+    {"id": 3, "name": "bus"},
+    {"id": 4, "name": "motorcycle"},
+    {"id": 5, "name": "lamp"},
+    {"id": 6, "name": "truck"},
 ]
+YOLO_CLASS_ID_TO_COCO_CATEGORY_ID = {index: category["id"] for index, category in enumerate(CATEGORIES)}
 
 
 def parse_args() -> argparse.Namespace:
@@ -130,7 +131,8 @@ def convert(dataset_root: Path, split: str, output_json: Path) -> dict[str, Any]
                 except ValueError:
                     skipped_labels += 1
                     continue
-                if class_id not in category_names:
+                category_id = YOLO_CLASS_ID_TO_COCO_CATEGORY_ID.get(class_id)
+                if category_id is None:
                     skipped_labels += 1
                     continue
                 bbox, clipped = convert_box(cx, cy, box_w, box_h, width, height)
@@ -143,13 +145,13 @@ def convert(dataset_root: Path, split: str, output_json: Path) -> dict[str, Any]
                     {
                         "id": annotation_id,
                         "image_id": image_id,
-                        "category_id": class_id,
+                        "category_id": category_id,
                         "bbox": bbox,
                         "area": bbox[2] * bbox[3],
                         "iscrowd": 0,
                     }
                 )
-                per_class[category_names[class_id]] += 1
+                per_class[category_names[category_id]] += 1
                 annotation_id += 1
 
     coco = {"images": images, "annotations": annotations, "categories": CATEGORIES}

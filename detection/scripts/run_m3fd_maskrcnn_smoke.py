@@ -35,6 +35,29 @@ def print_plan(args: argparse.Namespace, train_json: Path, test_json: Path) -> N
     print(f"  3. convert {args.test_split} split to COCO: {test_json}")
     print("  4. register m3fd_ir_train and m3fd_ir_test with Detectron2")
     print("  5. run standard Faster R-CNN R50-FPN bbox detection smoke training")
+    print("  6. evaluate bbox AP on the test split")
+
+
+def build_m3fd_smoke_trainer():
+    """Create a DefaultTrainer subclass with bbox-only COCO evaluation."""
+    try:
+        from detectron2.engine import DefaultTrainer
+        from detectron2.evaluation import COCOEvaluator
+    except ImportError as exc:
+        raise ImportError(
+            "detectron2 is required to train/evaluate the M3FD smoke pipeline. "
+            "Install a Detectron2 build compatible with your torch/CUDA environment."
+        ) from exc
+
+    class M3FDBBoxSmokeTrainer(DefaultTrainer):
+        @classmethod
+        def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+            if output_folder is None:
+                output_folder = str(Path(cfg.OUTPUT_DIR).parent / "eval")
+            Path(output_folder).mkdir(parents=True, exist_ok=True)
+            return COCOEvaluator(dataset_name, tasks=("bbox",), distributed=True, output_dir=output_folder)
+
+    return M3FDBBoxSmokeTrainer
 
 
 def main() -> int:
@@ -85,7 +108,6 @@ def main() -> int:
     try:
         from detectron2 import model_zoo
         from detectron2.config import get_cfg
-        from detectron2.engine import DefaultTrainer
     except ImportError as exc:
         print(f"missing: detectron2 ({exc})")
         return 1
@@ -115,9 +137,12 @@ def main() -> int:
     if config["weights"]:
         cfg.MODEL.WEIGHTS = str(config["weights"])
     Path(cfg.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
-    trainer = DefaultTrainer(cfg)
+    trainer_class = build_m3fd_smoke_trainer()
+    trainer = trainer_class(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
+    eval_results = trainer_class.test(cfg, trainer.model)
+    print(f"bbox evaluation results: {eval_results}")
     return 0
 
 
