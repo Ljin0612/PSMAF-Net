@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import math
+from dataclasses import dataclass
 from pathlib import Path
 
 from check_m3fd_detection import check_dataset
@@ -13,22 +15,121 @@ from register_m3fd_detectron2 import register_m3fd_coco
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run an M3FD-IR bbox detection smoke pipeline.")
+    parser = argparse.ArgumentParser(
+        description="Run an M3FD-IR bbox detection smoke pipeline."
+    )
     parser.add_argument("--dataset-root", required=True, type=Path)
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--layout", default="m3fd-rgbt", choices=("m3fd-rgbt",))
     parser.add_argument("--modality", default="ir", choices=("ir",))
     parser.add_argument("--train-split", default="train")
     parser.add_argument("--test-split", default="test")
-    parser.add_argument("--max-iter", type=int, default=10)
+    parser.add_argument(
+        "--max-iter",
+        type=int,
+        default=10,
+        help="Legacy iteration-based training length; prefer --epochs.",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Recommended epoch-based training length.",
+    )
+    parser.add_argument(
+        "--eval-every-epochs",
+        type=int,
+        default=1,
+        help="Evaluate every N epochs; set 0 to skip periodic eval and run final eval only.",
+    )
+    parser.add_argument(
+        "--checkpoint-every-epochs",
+        type=int,
+        default=1,
+        help="Save a checkpoint every N epochs.",
+    )
     parser.add_argument("--ims-per-batch", type=int, default=1)
     parser.add_argument("--input-size", type=int, default=1024)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
 
+@dataclass(frozen=True)
+class EpochSchedule:
+    num_train_images: int
+    ims_per_batch: int
+    steps_per_epoch: int
+    epochs: int | None
+    max_iter: int
+    eval_period: int
+    checkpoint_period: int
+    used_epochs: bool
+
+
+def compute_epoch_schedule(
+    *,
+    num_train_images: int,
+    ims_per_batch: int,
+    max_iter: int,
+    epochs: int | None,
+    eval_every_epochs: int,
+    checkpoint_every_epochs: int,
+) -> EpochSchedule:
+    """Convert epoch-oriented smoke settings to Detectron2 iteration periods."""
+    if num_train_images <= 0:
+        raise ValueError("num_train_images must be positive")
+    if ims_per_batch <= 0:
+        raise ValueError("ims_per_batch must be positive")
+    if max_iter <= 0:
+        raise ValueError("max_iter must be positive")
+    if epochs is not None and epochs <= 0:
+        raise ValueError("epochs must be positive when provided")
+    if eval_every_epochs < 0:
+        raise ValueError("eval_every_epochs must be non-negative")
+    if checkpoint_every_epochs <= 0:
+        raise ValueError("checkpoint_every_epochs must be positive")
+
+    steps_per_epoch = math.ceil(num_train_images / ims_per_batch)
+    used_epochs = epochs is not None
+    resolved_max_iter = epochs * steps_per_epoch if used_epochs else max_iter
+    eval_period = 0 if eval_every_epochs == 0 else steps_per_epoch * eval_every_epochs
+    checkpoint_period = steps_per_epoch * checkpoint_every_epochs
+    return EpochSchedule(
+        num_train_images=num_train_images,
+        ims_per_batch=ims_per_batch,
+        steps_per_epoch=steps_per_epoch,
+        epochs=epochs,
+        max_iter=resolved_max_iter,
+        eval_period=eval_period,
+        checkpoint_period=checkpoint_period,
+        used_epochs=used_epochs,
+    )
+
+
+def print_schedule(schedule: EpochSchedule, legacy_max_iter: int) -> None:
+    print("training schedule:")
+    print(f"  num_train_images: {schedule.num_train_images}")
+    print(f"  ims_per_batch: {schedule.ims_per_batch}")
+    print(f"  steps_per_epoch: {schedule.steps_per_epoch}")
+    print(
+        f"  epochs: {schedule.epochs if schedule.epochs is not None else 'not set (--max-iter mode)'}"
+    )
+    if schedule.used_epochs:
+        print(
+            "  max_iter: "
+            f"{schedule.max_iter} (= epochs {schedule.epochs} * steps_per_epoch {schedule.steps_per_epoch}; "
+            f"--max-iter {legacy_max_iter} ignored)"
+        )
+    else:
+        print(f"  max_iter: {schedule.max_iter} (--max-iter mode)")
+    print(f"  eval_period: {schedule.eval_period}")
+    print(f"  checkpoint_period: {schedule.checkpoint_period}")
+
+
 def print_plan(args: argparse.Namespace, train_json: Path, test_json: Path) -> None:
-    print("This is a Detectron2 bbox detection smoke test. UNIV backbone integration is the next step.")
+    print(
+        "This is a Detectron2 bbox detection smoke test. UNIV backbone integration is the next step."
+    )
     print("planned steps:")
     print(f"  1. check dataset root: {args.dataset_root}")
     print(f"  2. convert {args.train_split} split to COCO: {train_json}")
@@ -55,7 +156,12 @@ def build_m3fd_smoke_trainer():
             if output_folder is None:
                 output_folder = str(Path(cfg.OUTPUT_DIR).parent / "eval")
             Path(output_folder).mkdir(parents=True, exist_ok=True)
-            return COCOEvaluator(dataset_name, tasks=("bbox",), distributed=True, output_dir=output_folder)
+            return COCOEvaluator(
+                dataset_name,
+                tasks=("bbox",),
+                distributed=True,
+                output_dir=output_folder,
+            )
 
     return M3FDBBoxSmokeTrainer
 
@@ -87,6 +193,16 @@ def main() -> int:
     print(f"train conversion: {train_stats}")
     print(f"test conversion: {test_stats}")
 
+    schedule = compute_epoch_schedule(
+        num_train_images=int(train_stats["num_images"]),
+        ims_per_batch=args.ims_per_batch,
+        max_iter=args.max_iter,
+        epochs=args.epochs,
+        eval_every_epochs=args.eval_every_epochs,
+        checkpoint_every_epochs=args.checkpoint_every_epochs,
+    )
+    print_schedule(schedule, args.max_iter)
+
     config_args = argparse.Namespace(
         train_json=str(train_json),
         train_image_root=str(args.dataset_root.expanduser().resolve() / args.modality),
@@ -94,13 +210,22 @@ def main() -> int:
         test_image_root=str(args.dataset_root.expanduser().resolve() / args.modality),
         output_dir=str(work_dir / "detectron2_output"),
         num_classes=6,
-        max_iter=args.max_iter,
-        ims_per_batch=args.ims_per_batch,
+        max_iter=schedule.max_iter,
+        ims_per_batch=schedule.ims_per_batch,
         base_lr=8e-5,
         input_size=args.input_size,
         weights=None,
     )
     config = build_config(config_args)
+    config.update(
+        {
+            "num_train_images": schedule.num_train_images,
+            "steps_per_epoch": schedule.steps_per_epoch,
+            "epochs": schedule.epochs,
+            "eval_period": schedule.eval_period,
+            "checkpoint_period": schedule.checkpoint_period,
+        }
+    )
     config_json.parent.mkdir(parents=True, exist_ok=True)
     config_json.write_text(__import__("json").dumps(config, indent=2), encoding="utf-8")
     print(f"runtime config: {config_json}")
@@ -112,8 +237,16 @@ def main() -> int:
         print(f"missing: detectron2 ({exc})")
         return 1
 
-    register_m3fd_coco("m3fd_ir_train", str(args.dataset_root.expanduser().resolve() / args.modality), str(train_json))
-    register_m3fd_coco("m3fd_ir_test", str(args.dataset_root.expanduser().resolve() / args.modality), str(test_json))
+    register_m3fd_coco(
+        "m3fd_ir_train",
+        str(args.dataset_root.expanduser().resolve() / args.modality),
+        str(train_json),
+    )
+    register_m3fd_coco(
+        "m3fd_ir_test",
+        str(args.dataset_root.expanduser().resolve() / args.modality),
+        str(test_json),
+    )
 
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file(config["model_zoo_config"]))
@@ -129,6 +262,8 @@ def main() -> int:
     cfg.SOLVER.BASE_LR = float(config["base_lr"])
     cfg.SOLVER.MAX_ITER = int(config["max_iter"])
     cfg.SOLVER.STEPS = []
+    cfg.SOLVER.CHECKPOINT_PERIOD = int(schedule.checkpoint_period)
+    cfg.TEST.EVAL_PERIOD = int(schedule.eval_period)
     cfg.INPUT.MIN_SIZE_TRAIN = (int(config["input_size"]),)
     cfg.INPUT.MAX_SIZE_TRAIN = int(config["input_size"])
     cfg.INPUT.MIN_SIZE_TEST = int(config["input_size"])
@@ -141,8 +276,9 @@ def main() -> int:
     trainer = trainer_class(cfg)
     trainer.resume_or_load(resume=False)
     trainer.train()
-    eval_results = trainer_class.test(cfg, trainer.model)
-    print(f"bbox evaluation results: {eval_results}")
+    if cfg.TEST.EVAL_PERIOD == 0:
+        eval_results = trainer_class.test(cfg, trainer.model)
+        print(f"bbox final evaluation results: {eval_results}")
     return 0
 
 

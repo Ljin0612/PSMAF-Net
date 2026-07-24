@@ -124,18 +124,85 @@ python detection/scripts/run_m3fd_maskrcnn_smoke.py \
 
 ## Smoke-run
 
-Non-dry-run checks the dataset, converts train/test bbox-only COCO JSON, registers Detectron2 datasets, disables `MODEL.MASK_ON`, runs a minimal standard Faster R-CNN R50-FPN bbox detection smoke training job, and then evaluates bbox AP on the test split with Detectron2's COCO evaluator when Detectron2 is installed:
+Non-dry-run checks the dataset, converts train/test bbox-only COCO JSON, registers Detectron2 datasets, disables `MODEL.MASK_ON`, runs a standard Faster R-CNN R50-FPN bbox detection job, and evaluates bbox AP on the test split with Detectron2's COCO evaluator when Detectron2 is installed. Prefer the epoch-based interface for trend tracking:
 
 ```bash
 python detection/scripts/run_m3fd_maskrcnn_smoke.py \
   --dataset-root /path/to/M3FD \
-  --work-dir outputs/detection/maskrcnn_smoke \
+  --work-dir outputs/detection/maskrcnn_smoke_1ep \
+  --epochs 1 \
+  --eval-every-epochs 1 \
+  --checkpoint-every-epochs 1 \
+  --ims-per-batch 1 \
+  --input-size 1024
+```
+
+The runner computes `steps_per_epoch = ceil(num_train_images / ims_per_batch)` and then sets `SOLVER.MAX_ITER = epochs * steps_per_epoch`. With the standard M3FD train split (`3360` images) and `--ims-per-batch 1`, one epoch is approximately `3360` Detectron2 iterations. If both `--epochs` and the legacy `--max-iter` are provided, `--epochs` wins and the log prints the conversion. If `--epochs` is omitted, the legacy `--max-iter` path remains available:
+
+```bash
+python detection/scripts/run_m3fd_maskrcnn_smoke.py \
+  --dataset-root /path/to/M3FD \
+  --work-dir outputs/detection/maskrcnn_smoke_iter10 \
   --max-iter 10 \
   --ims-per-batch 1 \
   --input-size 1024
 ```
 
-Evaluation artifacts are written under the smoke work directory in `eval/`, for example `outputs/detection/maskrcnn_smoke/eval/`. This is still a Faster R-CNN R50-FPN bbox-only baseline; it is not a UNIV detector and it is not PSMAF-Net.
+Epoch-based examples:
+
+### 1 epoch sanity
+
+```bash
+python detection/scripts/run_m3fd_maskrcnn_smoke.py \
+  --dataset-root /path/to/M3FD \
+  --work-dir outputs/detection/maskrcnn_smoke_1ep \
+  --epochs 1 \
+  --eval-every-epochs 1 \
+  --checkpoint-every-epochs 1 \
+  --ims-per-batch 1 \
+  --input-size 1024
+```
+
+### 5 epoch trend
+
+```bash
+python detection/scripts/run_m3fd_maskrcnn_smoke.py \
+  --dataset-root /path/to/M3FD \
+  --work-dir outputs/detection/maskrcnn_smoke_5ep \
+  --epochs 5 \
+  --eval-every-epochs 1 \
+  --checkpoint-every-epochs 1 \
+  --ims-per-batch 1 \
+  --input-size 1024
+```
+
+### 12 epoch baseline
+
+```bash
+python detection/scripts/run_m3fd_maskrcnn_smoke.py \
+  --dataset-root /path/to/M3FD \
+  --work-dir outputs/detection/maskrcnn_smoke_12ep \
+  --epochs 12 \
+  --eval-every-epochs 1 \
+  --checkpoint-every-epochs 5 \
+  --ims-per-batch 1 \
+  --input-size 1024
+```
+
+### 25 epoch full baseline
+
+```bash
+python detection/scripts/run_m3fd_maskrcnn_smoke.py \
+  --dataset-root /path/to/M3FD \
+  --work-dir outputs/detection/maskrcnn_smoke_25ep \
+  --epochs 25 \
+  --eval-every-epochs 1 \
+  --checkpoint-every-epochs 5 \
+  --ims-per-batch 1 \
+  --input-size 1024
+```
+
+Set `--eval-every-epochs 0` to disable intermediate evaluation and keep only one final bbox AP evaluation. Periodic evaluation uses Detectron2 `TEST.EVAL_PERIOD`, checkpoint cadence uses `SOLVER.CHECKPOINT_PERIOD`, evaluation artifacts are written under the smoke work directory in `eval/` (for example `outputs/detection/maskrcnn_smoke/eval/`), and Detectron2 continues writing `metrics.json` plus TensorBoard event files under `detectron2_output/`. This is still a Faster R-CNN R50-FPN bbox-only baseline; it is not a UNIV detector and it is not PSMAF-Net.
 
 Do **not** use `COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml` directly with the bbox-only M3FD JSON. If a future experiment uses that instance-segmentation config, it must either provide legal `segmentation` fields or explicitly set `MODEL.MASK_ON = False`.
 
