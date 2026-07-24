@@ -86,6 +86,14 @@ def test_m3fd_ir_coco_converter_emits_bbox_only_metadata_and_annotations(tmp_pat
 
     assert stats["annotation_type"] == "bbox_only"
     assert stats["has_segmentation"] is False
+    assert set(coco) == {"info", "licenses", "images", "annotations", "categories"}
+    assert coco["info"]["description"] == "M3FD bbox detection dataset converted from YOLO labels"
+    assert coco["info"]["version"] == "1.0"
+    assert coco["info"]["year"] == 2026
+    assert coco["info"]["contributor"] == "PSMAF-Net"
+    assert coco["info"]["date_created"]
+    assert coco["licenses"] == [{"id": 1, "name": "Unknown", "url": ""}]
+    assert coco["images"]
     assert coco["annotations"]
     assert "bbox" in coco["annotations"][0]
     assert "segmentation" not in coco["annotations"][0]

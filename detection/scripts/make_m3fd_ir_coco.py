@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,13 @@ CATEGORIES = [
     {"id": 6, "name": "truck"},
 ]
 YOLO_CLASS_ID_TO_COCO_CATEGORY_ID = {index: category["id"] for index, category in enumerate(CATEGORIES)}
+COCO_INFO = {
+    "description": "M3FD bbox detection dataset converted from YOLO labels",
+    "version": "1.0",
+    "year": 2026,
+    "contributor": "PSMAF-Net",
+}
+COCO_LICENSES = [{"id": 1, "name": "Unknown", "url": ""}]
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,7 +162,13 @@ def convert(dataset_root: Path, split: str, output_json: Path) -> dict[str, Any]
                 per_class[category_names[category_id]] += 1
                 annotation_id += 1
 
-    coco = {"images": images, "annotations": annotations, "categories": CATEGORIES}
+    coco = {
+        "info": {**COCO_INFO, "date_created": date.today().isoformat()},
+        "licenses": COCO_LICENSES,
+        "images": images,
+        "annotations": annotations,
+        "categories": CATEGORIES,
+    }
     output_json.parent.mkdir(parents=True, exist_ok=True)
     with output_json.open("w", encoding="utf-8") as handle:
         json.dump(coco, handle, indent=2)
