@@ -1,3 +1,6 @@
+import argparse
+import json
+import sys
 from pathlib import Path
 
 from detection.scripts.m3fd_maskrcnn_scaffold import (
@@ -34,3 +37,64 @@ def test_split_file_count_ignores_blank_and_comment_lines(tmp_path):
     split_file.write_text("image_1\n\n# ignored\n image_2 \n", encoding="utf-8")
 
     assert split_file_count(split_file) == 2
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "detection" / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from make_m3fd_ir_coco import convert  # noqa: E402
+from make_m3fd_maskrcnn_config import build_config  # noqa: E402
+
+
+def test_m3fd_smoke_config_is_bbox_detection_only():
+    config = build_config(
+        argparse.Namespace(
+            train_json="train.json",
+            train_image_root="ir/train",
+            test_json="test.json",
+            test_image_root="ir/test",
+            output_dir="out",
+            num_classes=6,
+            max_iter=10,
+            ims_per_batch=1,
+            base_lr=8e-5,
+            input_size=1024,
+            weights=None,
+        )
+    )
+
+    assert config["model_zoo_config"] == "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"
+    assert config["model_zoo_config"] != "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"
+    assert config["mask_on"] is False
+    assert config["annotation_type"] == "bbox_only"
+
+
+def test_m3fd_ir_coco_converter_emits_bbox_only_metadata_and_annotations(tmp_path):
+    dataset_root = tmp_path / "M3FD"
+    for relative in ("ir", "labels", "meta"):
+        (dataset_root / relative).mkdir(parents=True)
+    (dataset_root / "meta" / "train.txt").write_text("sample_001\n", encoding="utf-8")
+    # Minimal 1x1 PNG header/body; image_size_from_header can read dimensions without Pillow.
+    (dataset_root / "ir" / "sample_001.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+    )
+    (dataset_root / "labels" / "sample_001.txt").write_text("0 0.5 0.5 1.0 1.0\n", encoding="utf-8")
+
+    output_json = tmp_path / "out" / "m3fd_ir_train.json"
+    stats = convert(dataset_root, "train", output_json)
+    coco = json.loads(output_json.read_text(encoding="utf-8"))
+
+    assert stats["annotation_type"] == "bbox_only"
+    assert stats["has_segmentation"] is False
+    assert coco["annotations"]
+    assert "bbox" in coco["annotations"][0]
+    assert "segmentation" not in coco["annotations"][0]
+
+
+def test_smoke_runner_explicitly_disables_mask_head():
+    source = (SCRIPTS_DIR / "run_m3fd_maskrcnn_smoke.py").read_text(encoding="utf-8")
+
+    assert "cfg.MODEL.MASK_ON = False" in source
+    assert 'cfg.MODEL.MASK_ON = bool(config.get("mask_on", False))' in source
+    assert "bbox-only," in source
+    assert "mask head must stay disabled" in source

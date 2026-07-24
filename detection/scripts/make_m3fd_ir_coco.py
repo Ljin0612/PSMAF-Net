@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Convert M3FD RGB-T YOLO annotations to COCO-style IR annotations."""
+"""Convert M3FD RGB-T YOLO annotations to bbox-only COCO-style IR annotations.
+
+This converter emits bbox-only COCO annotations for object detection. It does
+not emit segmentation polygons or masks. Downstream Detectron2 configs must
+disable mask heads when using this JSON.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ CATEGORIES = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Convert M3FD RGB-T YOLO labels to COCO JSON for Detectron2.")
+    parser = argparse.ArgumentParser(description="Convert M3FD RGB-T YOLO labels to bbox-only COCO JSON for Detectron2.")
     parser.add_argument("--dataset-root", required=True, type=Path)
     parser.add_argument("--split", required=True, choices=("train", "val", "test"))
     parser.add_argument("--layout", default="m3fd-rgbt", choices=("m3fd-rgbt",))
@@ -152,6 +157,8 @@ def convert(dataset_root: Path, split: str, output_json: Path) -> dict[str, Any]
     with output_json.open("w", encoding="utf-8") as handle:
         json.dump(coco, handle, indent=2)
     return {
+        "annotation_type": "bbox_only",
+        "has_segmentation": False,
         "num_images": len(images),
         "num_annotations": len(annotations),
         "per_class_counts": dict(per_class),

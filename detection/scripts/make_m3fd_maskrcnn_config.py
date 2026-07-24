@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate runtime metadata for an M3FD-IR Mask R-CNN smoke test."""
+"""Generate runtime metadata for an M3FD-IR bbox detection smoke test."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Write Mask R-CNN smoke-test config metadata.")
+    parser = argparse.ArgumentParser(description="Write bbox detection smoke-test config metadata.")
     parser.add_argument("--train-json", required=True)
     parser.add_argument("--train-image-root", required=True)
     parser.add_argument("--test-json", required=True)
@@ -27,9 +27,11 @@ def parse_args() -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> dict[str, object]:
     return {
-        "purpose": "M3FD-IR Detectron2 Mask R-CNN smoke test",
-        "note": "Standard Mask R-CNN R50-FPN baseline; UNIV backbone is not integrated in this config.",
-        "model_zoo_config": "COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml",
+        "purpose": "M3FD-IR Detectron2 bbox detection smoke test",
+        "note": "Standard Faster R-CNN R50-FPN bbox detection smoke baseline; M3FD labels provide boxes only. UNIV backbone is not integrated in this config.",
+        "model_zoo_config": "COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml",
+        "mask_on": False,
+        "annotation_type": "bbox_only",
         "train_json": args.train_json,
         "train_image_root": args.train_image_root,
         "test_json": args.test_json,
