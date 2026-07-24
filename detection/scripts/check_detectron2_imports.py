@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import platform
 import sys
 
@@ -22,6 +23,10 @@ def check_import(module_name: str, attr: str | None = None, label: str | None = 
 
 
 def main() -> int:
+    if importlib.util.find_spec("detectron2") is None:
+        print("missing")
+        return 1
+
     print("Detectron2 import check")
     print(f"python: {sys.version.split()[0]} ({platform.python_implementation()})")
 
