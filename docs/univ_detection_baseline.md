@@ -54,17 +54,10 @@ Infrared inputs use the official UNIV IR normalization (`mean=0.5338`,
 `model`, `state_dict`, `student`, `teacher`, or `backbone`. It removes repeated
 `module.`, `student.`, `backbone.`, `encoder.`, and PEFT `base_model.model.`
 prefixes, loads shape-compatible encoder tensors, and reports loaded, missing,
-unexpected, and shape-mismatched keys. For the PEFT checkpoints produced by the
-vendored UNIV training path, `base_layer` tensors are mapped back to their native
-module names and every complete LoRA A/B pair is merged as
-`base + (B @ A) * alpha / rank`. The default alpha is 32, matching the bundled
-UNIV configuration. An incomplete LoRA pair is rejected rather than silently
-discarded.
-
-Loading also fails when the checkpoint does not contain the first patch-embedding
-weight or does not cover at least 80% of encoder parameters by element count.
-Element-weighted coverage prevents a collection of small bias tensors from making
-an incompatible checkpoint appear sufficiently complete.
+unexpected, and shape-mismatched keys. PEFT `base_layer` tensors are mapped back
+to their original module names; users should supply a merged checkpoint when
+LoRA adapter deltas must also be retained. Loading fails when the file does not
+contain any compatible encoder weight.
 
 The checkpoint initializes only the official encoder. The detection feature
 adapter, RPN, and ROI heads are trained for the M3FD task.

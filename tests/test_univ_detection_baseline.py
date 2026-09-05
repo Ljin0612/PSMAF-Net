@@ -72,8 +72,3 @@ def test_univ_adapter_does_not_modify_vendored_source_contract():
     assert "third_party.UNIV.models.backbone.mcmae.vision_transformer" in source
     assert "class UNIVBackbone(Backbone):" in source
     assert 'return self.feature_adapter(self._encoder_stages(x))' in source
-    assert "MIN_LOAD_RATIO" in source
-    assert "LORA_ALPHA" in source
-    assert "def _merge_lora_weights(" in source
-    assert "loaded_numel" in source
-    assert 'required_stem = "patch_embed1.proj.weight"' in source

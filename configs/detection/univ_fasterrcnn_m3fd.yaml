@@ -9,8 +9,6 @@ MODEL:
     PRETRAIN_IMAGE_SIZE: 224
     OUT_CHANNELS: 256
     DROP_PATH_RATE: 0.2
-    MIN_LOAD_RATIO: 0.8
-    LORA_ALPHA: 32.0
   MASK_ON: false
   # M3FD IR is loaded as replicated 8-bit channels. These values implement the
   # official UNIV IR normalization mean=0.5338, std=0.2519 on Detectron2's 0-255 input.

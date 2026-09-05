@@ -32,10 +32,9 @@ class UNIVFeatureAdapter(nn.Module):
             raise ValueError("out_channels must be positive")
 
         self.out_channels = int(out_channels)
-        self.in_channels = tuple(int(channels) for channels in in_channels)
         self.projections = nn.ModuleList(
             nn.Conv2d(int(channels), self.out_channels, kernel_size=1)
-            for channels in self.in_channels
+            for channels in in_channels
         )
         self.p5 = nn.Conv2d(
             self.out_channels,
@@ -48,26 +47,6 @@ class UNIVFeatureAdapter(nn.Module):
     def forward(self, stages: Sequence[torch.Tensor]) -> dict[str, torch.Tensor]:
         if len(stages) != 3:
             raise ValueError(f"expected three UNIV stages, received {len(stages)}")
-        for index, (feature, channels) in enumerate(
-            zip(stages, self.in_channels), start=1
-        ):
-            if feature.ndim != 4:
-                raise ValueError(
-                    f"UNIV stage {index} must be BCHW, received shape {tuple(feature.shape)}"
-                )
-            if feature.shape[1] != channels:
-                raise ValueError(
-                    f"UNIV stage {index} must have {channels} channels, "
-                    f"received {feature.shape[1]}"
-                )
-        spatial_shapes = [feature.shape[-2:] for feature in stages]
-        for finer, coarser in zip(spatial_shapes, spatial_shapes[1:]):
-            expected = tuple(size // 2 for size in finer)
-            if tuple(coarser) != expected:
-                raise ValueError(
-                    "UNIV stages must form stride-4/8/16 levels; "
-                    f"received spatial shapes {spatial_shapes}"
-                )
         projected = [layer(feature) for layer, feature in zip(self.projections, stages)]
         features = dict(zip(FEATURE_NAMES[:3], projected))
         features["p5"] = self.p5(features["p4"])

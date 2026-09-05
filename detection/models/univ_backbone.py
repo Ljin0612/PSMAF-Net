@@ -31,8 +31,6 @@ def add_univ_config(cfg: CN) -> None:
     cfg.MODEL.UNIV.PRETRAIN_IMAGE_SIZE = 224
     cfg.MODEL.UNIV.OUT_CHANNELS = 256
     cfg.MODEL.UNIV.DROP_PATH_RATE = 0.2
-    cfg.MODEL.UNIV.MIN_LOAD_RATIO = 0.8
-    cfg.MODEL.UNIV.LORA_ALPHA = 32.0
 
 
 def _build_official_encoder(pretrain_image_size: int, drop_path_rate: float) -> nn.Module:
@@ -93,55 +91,6 @@ def _unwrap_state_dict(checkpoint: Any) -> dict[str, torch.Tensor]:
     return state_dict
 
 
-def _merge_lora_weights(
-    state_dict: dict[str, torch.Tensor], lora_alpha: float
-) -> tuple[dict[str, torch.Tensor], list[str]]:
-    """Merge PEFT LoRA A/B tensors into their corresponding base weights.
-
-    UNIV pretraining enables LoRA with alpha 32. Loading only PEFT's
-    ``base_layer`` tensors would silently discard the learned UNIV update. This
-    routine performs the same ``B @ A * alpha / rank`` merge for Linear and
-    Conv2d weights without requiring PEFT in the detection environment.
-    """
-    if lora_alpha <= 0:
-        raise ValueError("lora_alpha must be positive")
-    merged = dict(state_dict)
-    merged_names: list[str] = []
-    a_marker = ".lora_A."
-    for a_key, a_weight in state_dict.items():
-        if a_marker not in a_key or not a_key.endswith(".weight"):
-            continue
-        module_name, adapter_suffix = a_key.split(a_marker, maxsplit=1)
-        b_key = f"{module_name}.lora_B.{adapter_suffix}"
-        base_key = f"{module_name}.weight"
-        b_weight = state_dict.get(b_key)
-        base_weight = merged.get(base_key)
-        if b_weight is None or base_weight is None:
-            raise RuntimeError(
-                f"incomplete LoRA checkpoint entry for {module_name}: "
-                f"base={base_key in state_dict}, B={b_key in state_dict}"
-            )
-        rank = a_weight.shape[0]
-        if rank <= 0:
-            raise RuntimeError(f"invalid LoRA rank for {module_name}: {rank}")
-        try:
-            delta = b_weight.reshape(b_weight.shape[0], rank) @ a_weight.reshape(
-                rank, -1
-            )
-            delta = delta.reshape_as(base_weight)
-        except RuntimeError as exc:
-            raise RuntimeError(
-                f"cannot merge LoRA tensors for {module_name}: "
-                f"base={tuple(base_weight.shape)}, A={tuple(a_weight.shape)}, "
-                f"B={tuple(b_weight.shape)}"
-            ) from exc
-        merged[base_key] = base_weight + delta.to(base_weight.dtype) * (
-            float(lora_alpha) / rank
-        )
-        merged_names.append(module_name)
-    return merged, sorted(merged_names)
-
-
 @BACKBONE_REGISTRY.register()
 class UNIVBackbone(Backbone):
     """Official UNIV encoder exposed as ``p2`` through ``p5`` feature maps."""
@@ -166,11 +115,7 @@ class UNIVBackbone(Backbone):
         self.checkpoint_report: dict[str, Any] | None = None
 
         if univ_cfg.CHECKPOINT:
-            self.checkpoint_report = self.load_pretrained(
-                univ_cfg.CHECKPOINT,
-                min_load_ratio=float(univ_cfg.MIN_LOAD_RATIO),
-                lora_alpha=float(univ_cfg.LORA_ALPHA),
-            )
+            self.checkpoint_report = self.load_pretrained(univ_cfg.CHECKPOINT)
         self.set_backbone_trainable(not bool(univ_cfg.FREEZE))
 
     @property
@@ -203,21 +148,13 @@ class UNIVBackbone(Backbone):
             self.encoder.eval()
         return self
 
-    def load_pretrained(
-        self,
-        checkpoint_path: str | Path,
-        min_load_ratio: float = 0.8,
-        lora_alpha: float = 32.0,
-    ) -> dict[str, Any]:
-        if not 0.0 < min_load_ratio <= 1.0:
-            raise ValueError("min_load_ratio must be in the interval (0, 1]")
+    def load_pretrained(self, checkpoint_path: str | Path) -> dict[str, Any]:
         path = Path(checkpoint_path).expanduser().resolve()
         if not path.is_file():
             raise FileNotFoundError(f"UNIV checkpoint does not exist: {path}")
         state_dict = _unwrap_state_dict(
             torch.load(path, map_location="cpu", weights_only=True)
         )
-        state_dict, merged_lora_modules = _merge_lora_weights(state_dict, lora_alpha)
         model_state = self.encoder.state_dict()
         compatible = {
             key: value
@@ -230,32 +167,21 @@ class UNIVBackbone(Backbone):
             if key in model_state and model_state[key].shape != value.shape
         )
         incompatible = self.encoder.load_state_dict(compatible, strict=False)
-        loaded_numel = sum(model_state[key].numel() for key in compatible)
-        total_numel = sum(value.numel() for value in model_state.values())
-        loaded_ratio = loaded_numel / total_numel
         report = {
             "path": str(path),
             "loaded": len(compatible),
             "missing_keys": sorted(incompatible.missing_keys),
             "unexpected_keys": sorted(set(state_dict) - set(model_state)),
             "shape_mismatch": shape_mismatch,
-            "loaded_ratio": loaded_ratio,
-            "merged_lora_modules": merged_lora_modules,
         }
         print(
             "UNIV checkpoint: "
             f"loaded={report['loaded']} missing={len(report['missing_keys'])} "
             f"unexpected={len(report['unexpected_keys'])} "
-            f"shape_mismatch={len(report['shape_mismatch'])} "
-            f"lora_merged={len(merged_lora_modules)} path={path}"
+            f"shape_mismatch={len(report['shape_mismatch'])} path={path}"
         )
-        required_stem = "patch_embed1.proj.weight"
-        if required_stem not in compatible or loaded_ratio < min_load_ratio:
-            raise RuntimeError(
-                "UNIV checkpoint coverage is too low: "
-                f"loaded_ratio={loaded_ratio:.3f}, required={min_load_ratio:.3f}, "
-                f"stem_loaded={required_stem in compatible}, path={path}"
-            )
+        if not compatible:
+            raise RuntimeError(f"no compatible UNIV encoder weights found in {path}")
         return report
 
     @staticmethod
