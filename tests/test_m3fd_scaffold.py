@@ -1,13 +1,15 @@
 import argparse
 import json
-import sys
 from pathlib import Path
 
+from detection.scripts.make_m3fd_ir_coco import convert
+from detection.scripts.make_m3fd_maskrcnn_config import build_config
 from detection.scripts.m3fd_maskrcnn_scaffold import (
     detectron2_config_template,
     load_experiment,
     split_file_count,
 )
+from detection.scripts.run_m3fd_maskrcnn_smoke import compute_epoch_schedule
 
 
 def test_m3fd_config_records_official_detection_setting(tmp_path):
@@ -42,12 +44,6 @@ def test_split_file_count_ignores_blank_and_comment_lines(tmp_path):
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "detection" / "scripts"
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-
-from make_m3fd_ir_coco import convert  # noqa: E402
-from make_m3fd_maskrcnn_config import build_config  # noqa: E402
-from run_m3fd_maskrcnn_smoke import compute_epoch_schedule  # noqa: E402
 
 
 def test_epoch_schedule_converts_epochs_to_max_iter():
