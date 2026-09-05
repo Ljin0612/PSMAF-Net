@@ -15,7 +15,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from check_m3fd_detection import IMAGE_EXTENSIONS, find_image, find_label, read_split
+from detection.scripts.check_m3fd_detection import (
+    IMAGE_EXTENSIONS,
+    find_image,
+    find_label,
+    read_split,
+)
 
 CATEGORIES = [
     {"id": 1, "name": "people"},

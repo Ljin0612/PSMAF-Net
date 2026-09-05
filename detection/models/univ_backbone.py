@@ -152,8 +152,12 @@ class UNIVBackbone(Backbone):
         path = Path(checkpoint_path).expanduser().resolve()
         if not path.is_file():
             raise FileNotFoundError(f"UNIV checkpoint does not exist: {path}")
+        # Official UNIV checkpoints include trusted argparse.Namespace metadata,
+        # which PyTorch's restricted weights-only unpickler intentionally rejects.
+        # This path is supplied explicitly by the user and is therefore treated as
+        # a trusted local checkpoint, matching the loader used by upstream UNIV.
         state_dict = _unwrap_state_dict(
-            torch.load(path, map_location="cpu", weights_only=True)
+            torch.load(path, map_location="cpu", weights_only=False)
         )
         model_state = self.encoder.state_dict()
         compatible = {

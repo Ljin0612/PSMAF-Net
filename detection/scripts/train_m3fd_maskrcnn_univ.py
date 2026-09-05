@@ -6,7 +6,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from m3fd_maskrcnn_scaffold import detectron2_config_template, load_experiment
+from detection.scripts.m3fd_maskrcnn_scaffold import (
+    detectron2_config_template,
+    load_experiment,
+)
 
 
 DEFAULT_CONFIG = Path("detection/configs/m3fd_ir_maskrcnn_univ.yaml")
