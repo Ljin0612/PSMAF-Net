@@ -26,6 +26,7 @@ logs/
 wandb/
 tensorboard/
 checkpoints/
+pretrained/
 work_dirs/
 
 # Model weights and exported models
