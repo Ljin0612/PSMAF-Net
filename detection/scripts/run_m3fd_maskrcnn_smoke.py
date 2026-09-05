@@ -8,10 +8,10 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from check_m3fd_detection import check_dataset
-from make_m3fd_ir_coco import convert
-from make_m3fd_maskrcnn_config import build_config
-from register_m3fd_detectron2 import register_m3fd_coco
+from detection.scripts.check_m3fd_detection import check_dataset
+from detection.scripts.make_m3fd_ir_coco import convert
+from detection.scripts.make_m3fd_maskrcnn_config import build_config
+from detection.scripts.register_m3fd_detectron2 import register_m3fd_coco
 
 
 def parse_args() -> argparse.Namespace:
