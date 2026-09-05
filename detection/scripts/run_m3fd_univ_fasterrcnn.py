@@ -1,0 +1,198 @@
+#!/usr/bin/env python3
+"""Train and evaluate the UNIV-original Faster R-CNN baseline on M3FD-IR."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from detection.scripts.check_m3fd_detection import check_dataset
+from detection.scripts.make_m3fd_ir_coco import convert
+from detection.scripts.register_m3fd_detectron2 import THING_CLASSES, register_m3fd_coco
+from detection.scripts.run_m3fd_maskrcnn_smoke import (
+    compute_epoch_schedule,
+    print_schedule,
+)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run the UNIV-original M3FD-IR Faster R-CNN bbox baseline."
+    )
+    parser.add_argument("--dataset-root", required=True, type=Path)
+    parser.add_argument("--checkpoint", required=True, type=Path)
+    parser.add_argument("--freeze-backbone", action="store_true")
+    parser.add_argument("--epochs", type=int, default=12)
+    parser.add_argument("--eval-every-epochs", type=int, default=1)
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--work-dir", type=Path, default=Path("outputs/detection/m3fd_univ"))
+    parser.add_argument("--ims-per-batch", type=int, default=1)
+    parser.add_argument("--input-size", type=int, default=1024)
+    parser.add_argument("--checkpoint-every-epochs", type=int, default=1)
+    parser.add_argument(
+        "--max-iter",
+        type=int,
+        default=None,
+        help="Override epoch scheduling with an exact iteration count.",
+    )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Force a 10-iteration checkpoint/forward/loss/backward smoke run.",
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def build_trainer():
+    try:
+        from detectron2.engine import DefaultTrainer
+        from detectron2.evaluation import COCOEvaluator
+    except ImportError as exc:
+        raise ImportError(
+            "Detectron2 is required for the UNIV detection baseline. Install a "
+            "build compatible with the active PyTorch and CUDA versions."
+        ) from exc
+
+    class M3FDUNIVTrainer(DefaultTrainer):
+        @classmethod
+        def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+            output_folder = output_folder or str(Path(cfg.OUTPUT_DIR) / "eval")
+            Path(output_folder).mkdir(parents=True, exist_ok=True)
+            return COCOEvaluator(
+                dataset_name,
+                tasks=("bbox",),
+                distributed=True,
+                output_dir=output_folder,
+            )
+
+    return M3FDUNIVTrainer
+
+
+def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | None]:
+    """Select the paper-facing aggregate and per-class bbox metrics."""
+    bbox = (results or {}).get("bbox", {})
+    names = ("AP", "AP50", "AP75", *(f"AP-{name}" for name in THING_CLASSES))
+    return {name: bbox.get(name) for name in names}
+
+
+def _check_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    dataset_root = args.dataset_root.expanduser().resolve()
+    checkpoint = args.checkpoint.expanduser().resolve()
+    work_dir = args.work_dir.expanduser().resolve()
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"UNIV checkpoint does not exist: {checkpoint}")
+    for split in ("train", "test"):
+        errors, warnings, count = check_dataset(dataset_root, "m3fd-rgbt", split)
+        print(f"dataset check split={split}: samples={count}")
+        for warning in warnings:
+            print(f"  warning: {warning}")
+        if errors:
+            raise ValueError(f"M3FD {split} check failed: {'; '.join(errors)}")
+    return dataset_root, checkpoint, work_dir
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    dataset_root, checkpoint, work_dir = _check_inputs(args)
+    train_json = work_dir / "coco" / "m3fd_ir_train.json"
+    test_json = work_dir / "coco" / "m3fd_ir_test.json"
+
+    if args.dry_run:
+        print("UNIV-original baseline dry run")
+        print(f"  dataset_root: {dataset_root}")
+        print(f"  checkpoint: {checkpoint}")
+        print(f"  freeze_backbone: {args.freeze_backbone}")
+        print(f"  device: {args.device}")
+        print("dry_run: no files generated and no training started")
+        return 0
+
+    train_stats = convert(dataset_root, "train", train_json)
+    test_stats = convert(dataset_root, "test", test_json)
+    print(f"train conversion: {train_stats}")
+    print(f"test conversion: {test_stats}")
+
+    exact_iterations = 10 if args.smoke_test else args.max_iter
+    schedule = compute_epoch_schedule(
+        num_train_images=int(train_stats["num_images"]),
+        ims_per_batch=args.ims_per_batch,
+        max_iter=exact_iterations or 1,
+        epochs=None if exact_iterations is not None else args.epochs,
+        eval_every_epochs=args.eval_every_epochs,
+        checkpoint_every_epochs=args.checkpoint_every_epochs,
+    )
+    print_schedule(schedule, exact_iterations or 1)
+
+    try:
+        from detectron2 import model_zoo
+        from detectron2.config import get_cfg
+    except ImportError as exc:
+        raise ImportError(
+            "Detectron2 is required for the UNIV detection baseline."
+        ) from exc
+
+    # Import registers UNIVBackbone in Detectron2's BACKBONE_REGISTRY.
+    from detection.models.univ_backbone import add_univ_config
+
+    register_m3fd_coco("m3fd_ir_train_univ", str(dataset_root / "ir"), str(train_json))
+    register_m3fd_coco("m3fd_ir_test_univ", str(dataset_root / "ir"), str(test_json))
+
+    cfg = get_cfg()
+    add_univ_config(cfg)
+    cfg.merge_from_file(
+        model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
+    )
+    cfg.merge_from_file(str(REPO_ROOT / "configs/detection/univ_fasterrcnn_m3fd.yaml"))
+    cfg.DATASETS.TRAIN = ("m3fd_ir_train_univ",)
+    cfg.DATASETS.TEST = ("m3fd_ir_test_univ",)
+    cfg.DATALOADER.NUM_WORKERS = 0
+    cfg.MODEL.UNIV.CHECKPOINT = str(checkpoint)
+    cfg.MODEL.UNIV.FREEZE = bool(args.freeze_backbone)
+    cfg.MODEL.DEVICE = args.device
+    cfg.MODEL.WEIGHTS = ""
+    cfg.SOLVER.IMS_PER_BATCH = int(args.ims_per_batch)
+    cfg.SOLVER.MAX_ITER = int(schedule.max_iter)
+    cfg.SOLVER.CHECKPOINT_PERIOD = int(schedule.checkpoint_period)
+    cfg.TEST.EVAL_PERIOD = int(schedule.eval_period)
+    cfg.INPUT.MIN_SIZE_TRAIN = (int(args.input_size),)
+    cfg.INPUT.MAX_SIZE_TRAIN = int(args.input_size)
+    cfg.INPUT.MIN_SIZE_TEST = int(args.input_size)
+    cfg.INPUT.MAX_SIZE_TEST = int(args.input_size)
+    cfg.OUTPUT_DIR = str(work_dir / "detectron2_output")
+    Path(cfg.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+
+    runtime = {
+        "baseline": "UNIV-original",
+        "checkpoint": str(checkpoint),
+        "freeze_backbone": bool(args.freeze_backbone),
+        "device": args.device,
+        "max_iter": schedule.max_iter,
+        "epochs": schedule.epochs,
+        "eval_period": schedule.eval_period,
+        "annotation_type": "bbox_only",
+    }
+    (work_dir / "runtime.json").write_text(json.dumps(runtime, indent=2), encoding="utf-8")
+
+    trainer_class = build_trainer()
+    trainer = trainer_class(cfg)
+    trainer.resume_or_load(resume=False)
+    results = trainer.train()
+    metrics = format_bbox_metrics(results)
+    print("UNIV-original bbox metrics:")
+    for name, value in metrics.items():
+        print(f"  {name}: {value}")
+    (work_dir / "bbox_metrics.json").write_text(
+        json.dumps(metrics, indent=2), encoding="utf-8"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
