@@ -1,0 +1,16 @@
+path: /home/jinlei/database/M3FD_Detection
+vi: vi
+ir: ir
+labels: labels
+meta: meta
+train: meta/train.txt
+val: meta/val.txt
+test: meta/test.txt
+nc: 6
+names:
+  0: people
+  1: car
+  2: bus
+  3: motorcycle
+  4: lamp
+  5: truck
