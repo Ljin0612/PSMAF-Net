@@ -133,8 +133,17 @@ def build_trainer():
 
 def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | None]:
     """Select the paper-facing aggregate and per-class bbox metrics."""
-    bbox = (results or {}).get("bbox", {})
-    names = ("AP", "AP50", "AP75", *(f"AP-{name}" for name in THING_CLASSES))
+    results = results or {}
+    bbox = results["bbox"] if "bbox" in results else results
+    names = (
+        "AP",
+        "AP50",
+        "AP75",
+        "APs",
+        "APm",
+        "APl",
+        *(f"AP-{name}" for name in THING_CLASSES),
+    )
     return {name: bbox.get(name) for name in names}
 
 
