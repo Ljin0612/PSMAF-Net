@@ -147,6 +147,15 @@ def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | Non
     return {name: bbox.get(name) for name in names}
 
 
+def resolve_evaluation_results(trainer, trainer_class, cfg, results):
+    """Recover evaluation results when ``train`` does not return hook output."""
+    if not results:
+        results = getattr(trainer, "_last_eval_results", None)
+    if not results:
+        results = trainer_class.test(cfg, trainer.model)
+    return results
+
+
 def _check_inputs(args: argparse.Namespace) -> tuple[Path, Path, Path]:
     dataset_root = args.dataset_root.expanduser().resolve()
     checkpoint = args.checkpoint.expanduser().resolve()
@@ -254,6 +263,11 @@ def main(argv: list[str] | None = None) -> int:
     trainer = trainer_class(cfg)
     trainer.resume_or_load(resume=False)
     results = trainer.train()
+    results = resolve_evaluation_results(trainer, trainer_class, cfg, results)
+    print(f"raw evaluation results: {results}")
+    (work_dir / "raw_eval_results.json").write_text(
+        json.dumps(results, indent=2), encoding="utf-8"
+    )
     metrics = format_bbox_metrics(results)
     print("UNIV-original bbox metrics:")
     for name, value in metrics.items():
