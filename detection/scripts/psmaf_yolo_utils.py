@@ -36,6 +36,13 @@ TRAIN_LOG_FIELDS = ("epoch", "avg_total_loss", "avg_obj_loss", "avg_box_loss", "
                     "learning_rate", "val_precision", "val_recall", "val_AP50", "val_mAP50_95")
 
 
+def reset_train_logs(output_dir):
+    """Remove epoch logs left by an earlier run in ``output_dir``."""
+    output = Path(output_dir)
+    for filename in ("train_log.csv", "train_log.jsonl"):
+        (output / filename).unlink(missing_ok=True)
+
+
 def save_train_log_row(row, output_dir):
     """Append one epoch summary to the CSV and JSON-lines training logs."""
     output = Path(output_dir); output.mkdir(parents=True, exist_ok=True)

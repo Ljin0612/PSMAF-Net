@@ -1,3 +1,6 @@
+import csv
+import json
+
 import pytest
 torch = pytest.importorskip("torch")
 
@@ -5,6 +8,7 @@ from core.psmaf import MultiScaleAdaptiveFusion, PSMAFFusion, PseudoSemanticGuid
 from detection.models.psmaf_yolo import PSMAFYOLO, detection_loss
 from detection.scripts.psmaf_yolo_utils import (decode_outputs, evaluate, evaluate_detection,
                                                 limit_dataset, non_max_suppression, save_train_log_row)
+from detection.scripts.train_psmaf_yolo_m3fd import parser, prepare_train_logs
 
 
 def test_pseudo_semantic_guidance_preserves_spatial_size():
@@ -81,13 +85,47 @@ def test_detection_loss_returns_components():
     torch.testing.assert_close(result["loss"], result["obj_loss"] + result["box_loss"] + result["cls_loss"])
 
 
-def test_train_log_row_can_be_created(tmp_path):
-    row = {"epoch": 1, "avg_total_loss": 3., "avg_obj_loss": 1., "avg_box_loss": 1.,
-           "avg_cls_loss": 1., "learning_rate": .001, "val_precision": 0., "val_recall": 0.,
-           "val_AP50": 0., "val_mAP50_95": 0.}
-    save_train_log_row(row, tmp_path)
-    assert (tmp_path / "train_log.csv").read_text().count("\n") == 2
-    assert '"epoch": 1' in (tmp_path / "train_log.jsonl").read_text()
+def _train_log_row(epoch):
+    return {"epoch": epoch, "avg_total_loss": 3., "avg_obj_loss": 1., "avg_box_loss": 1.,
+            "avg_cls_loss": 1., "learning_rate": .001, "val_precision": 0., "val_recall": 0.,
+            "val_AP50": 0., "val_mAP50_95": 0.}
+
+
+@pytest.mark.parametrize("extra_args", [[], ["--weights", "pretrained.pt"]], ids=("scratch", "weights"))
+def test_fresh_run_resets_existing_train_logs(tmp_path, extra_args):
+    save_train_log_row(_train_log_row(99), tmp_path)
+
+    args = parser().parse_args(extra_args)
+    prepare_train_logs(tmp_path, resume=args.resume)
+    save_train_log_row(_train_log_row(1), tmp_path)
+
+    with (tmp_path / "train_log.csv").open(newline="") as handle:
+        assert [row["epoch"] for row in csv.DictReader(handle)] == ["1"]
+    assert [row["epoch"] for row in map(json.loads, (tmp_path / "train_log.jsonl").read_text().splitlines())] == [1]
+
+
+@pytest.mark.parametrize("resume", ["auto", "checkpoint.pt"], ids=("auto", "explicit-checkpoint"))
+def test_resumed_run_keeps_existing_train_logs_and_appends(tmp_path, resume):
+    save_train_log_row(_train_log_row(1), tmp_path)
+
+    prepare_train_logs(tmp_path, resume=resume)
+    save_train_log_row(_train_log_row(2), tmp_path)
+
+    with (tmp_path / "train_log.csv").open(newline="") as handle:
+        assert [row["epoch"] for row in csv.DictReader(handle)] == ["1", "2"]
+    assert [row["epoch"] for row in map(json.loads, (tmp_path / "train_log.jsonl").read_text().splitlines())] == [1, 2]
+
+
+def test_train_log_rows_are_valid_csv_and_jsonl(tmp_path):
+    expected = _train_log_row(1)
+    save_train_log_row(expected, tmp_path)
+
+    with (tmp_path / "train_log.csv").open(newline="") as handle:
+        csv_rows = list(csv.DictReader(handle))
+    jsonl_rows = [json.loads(line) for line in (tmp_path / "train_log.jsonl").read_text().splitlines()]
+    assert list(csv_rows[0]) == list(expected)
+    assert len(csv_rows) == len(jsonl_rows) == 1
+    assert jsonl_rows == [expected]
 
 
 def test_debug_num_images_limits_dataset_size():
