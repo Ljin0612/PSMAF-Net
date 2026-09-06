@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 
 from detection.datasets import M3FDPairedDataset, paired_collate_fn
 from detection.models.psmaf_yolo import PSMAFYOLO, detection_loss
-from detection.scripts.psmaf_yolo_utils import (evaluate, limit_dataset, save_metrics,
+from detection.scripts.psmaf_yolo_utils import (evaluate, limit_dataset, reset_train_logs, save_metrics,
                                                  save_train_log_row, seed_everything)
 
 
@@ -36,6 +36,15 @@ def parser():
     p.add_argument("--debug-num-images", type=int, default=0,
                    help="use only the first N train/val samples for debugging; not for official reporting")
     return p
+
+
+def prepare_train_logs(output_dir, resume):
+    """Reset logs for a fresh run, or preserve them when resuming."""
+    if resume:
+        print(f"Resuming run; keeping existing training logs: {output_dir}")
+    else:
+        reset_train_logs(output_dir)
+        print(f"Reset training logs for fresh run: {output_dir}")
 
 
 def main(args=None):
@@ -69,6 +78,7 @@ def main(args=None):
                 scaler.load_state_dict(state["scaler"])
             else:
                 warnings.warn("checkpoint has no AMP scaler state; using a fresh scaler", stacklevel=1)
+    prepare_train_logs(output, args.resume)
     for epoch in range(start, args.epochs):
         model.train()
         sums = {key: 0.0 for key in ("loss", "obj_loss", "box_loss", "cls_loss")}; batches = 0
