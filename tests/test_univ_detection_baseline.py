@@ -45,6 +45,9 @@ def test_univ_runner_reports_aggregate_and_per_class_ap():
                 "AP": 10.0,
                 "AP50": 20.0,
                 "AP75": 5.0,
+                "APs": 4.0,
+                "APm": 8.0,
+                "APl": 16.0,
                 "AP-people": 11.0,
                 "AP-car": 12.0,
             }
@@ -54,9 +57,30 @@ def test_univ_runner_reports_aggregate_and_per_class_ap():
     assert metrics["AP"] == 10.0
     assert metrics["AP50"] == 20.0
     assert metrics["AP75"] == 5.0
+    assert metrics["APs"] == 4.0
+    assert metrics["APm"] == 8.0
+    assert metrics["APl"] == 16.0
     assert metrics["AP-people"] == 11.0
     assert metrics["AP-car"] == 12.0
     assert "AP-truck" in metrics
+
+
+def test_univ_runner_extracts_nested_detectron2_bbox_results():
+    metrics = format_bbox_metrics(
+        {"bbox": {"AP": 1.0, "AP50": 2.0, "AP75": 3.0}}
+    )
+
+    assert metrics["AP"] == 1.0
+    assert metrics["AP50"] == 2.0
+    assert metrics["AP75"] == 3.0
+
+
+def test_univ_runner_accepts_flat_bbox_results_as_fallback():
+    metrics = format_bbox_metrics({"AP": 1.0, "AP50": 2.0, "AP75": 3.0})
+
+    assert metrics["AP"] == 1.0
+    assert metrics["AP50"] == 2.0
+    assert metrics["AP75"] == 3.0
 
 
 def test_univ_config_selects_registered_backbone_and_bbox_features():
