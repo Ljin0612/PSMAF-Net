@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from detection.scripts.psmaf_yolo_utils import (NAMES, evaluate_detection,
+from detection.scripts.psmaf_yolo_utils import (NAMES, _class_ap, evaluate_detection,
                                                  non_max_suppression,
                                                  xywh_to_xyxy)
 
@@ -52,7 +52,7 @@ def decode_yolov8_outputs(outputs, image_size, strides=(8, 16, 32), reg_max=16):
 def yolov8_detection_loss(outputs, targets, nc=6, strides=(8, 16, 32), reg_max=16):
     """Anchor-free YOLOv8-style DFL/box/class loss with centre assignment."""
     cls_loss = outputs[0].new_zeros(()); box_loss = outputs[0].new_zeros(())
-    positives = 0
+    cls_elements = 0; positives = 0
     for head, stride in zip(outputs, strides):
         b, _, h, w = head.shape
         cls_target = head.new_zeros((b, nc, h, w))
@@ -70,11 +70,19 @@ def yolov8_detection_loss(outputs, targets, nc=6, strides=(8, 16, 32), reg_max=1
             lower = target.floor().long(); upper = lower + 1
             box_loss = box_loss + ((upper - target) * F.cross_entropy(logits, lower, reduction="none") +
                                    (target - lower) * F.cross_entropy(logits, upper, reduction="none")).mean()
-        cls_loss = cls_loss + F.binary_cross_entropy_with_logits(head[:, 4 * reg_max:], cls_target, reduction="sum") / max(positives, 1)
+        class_logits = head[:, 4 * reg_max:]
+        cls_loss = cls_loss + F.binary_cross_entropy_with_logits(class_logits, cls_target, reduction="sum")
+        cls_elements += class_logits.numel()
+    # Classification supervises every class at every cell, so its denominator
+    # must include negative cells too.  Normalizing this sum by positives made
+    # the loss grow with image resolution and overwhelmed box optimization.
+    cls_loss = cls_loss / max(cls_elements, 1)
     box_loss = box_loss / max(positives, 1)
     obj_loss = outputs[0].new_zeros(())  # YOLOv8 folds object confidence into class logits.
     total = 7.5 * box_loss + .5 * cls_loss
-    return {"loss": total, "obj_loss": obj_loss, "box_loss": box_loss, "cls_loss": cls_loss}
+    num_pos = outputs[0].new_tensor(positives)
+    return {"loss": total, "obj_loss": obj_loss, "box_loss": box_loss,
+            "cls_loss": cls_loss, "num_pos": num_pos}
 
 
 @torch.no_grad()
@@ -96,8 +104,22 @@ def evaluate_yolov8(model, loader, device, confidence_threshold=.25, nms_iou_thr
     metrics = evaluate_detection(predictions, targets, NAMES)
     metrics = {key: metrics[key] for key in METRIC_KEYS}
     if diagnostics_path:
+        class_results = [_class_ap(predictions, targets, class_id, .5)
+                         for class_id in range(len(NAMES))]
+        tp50 = [result[1] for result in class_results]
+        fp50 = [result[2] for result in class_results]
+        gt_counts = [result[3] for result in class_results]
+        fn50 = [gt - tp for gt, tp in zip(gt_counts, tp50)]
+        prediction_counts = [sum(int((rows[:, 5].long() == class_id).sum()) for rows in predictions)
+                             for class_id in range(len(NAMES))]
         path = Path(diagnostics_path); path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"decoded_boxes": decoded_count, "boxes_after_confidence": filtered_count,
                                     "boxes_after_nms": nms_count, "images": len(targets),
-                                    "gt_boxes": sum(len(x["boxes"]) for x in targets)}, indent=2))
+                                    "gt_boxes": sum(gt_counts), "tp50": sum(tp50),
+                                    "fp50": sum(fp50), "fn50": sum(fn50),
+                                    "per_class_gt_counts": dict(zip(NAMES, gt_counts)),
+                                    "per_class_prediction_counts": dict(zip(NAMES, prediction_counts)),
+                                    "per_class_tp50": dict(zip(NAMES, tp50)),
+                                    "per_class_fp50": dict(zip(NAMES, fp50)),
+                                    "per_class_fn50": dict(zip(NAMES, fn50))}, indent=2))
     return metrics

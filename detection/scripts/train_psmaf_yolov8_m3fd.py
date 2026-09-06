@@ -67,7 +67,7 @@ def main(args=None):
         load_yolov8s_weights(model, args.weights)
     for epoch in range(start, args.epochs):
         model.train()
-        sums = {key: 0.0 for key in ("loss", "obj_loss", "box_loss", "cls_loss")}; batches = 0
+        sums = {key: 0.0 for key in ("loss", "obj_loss", "box_loss", "cls_loss", "num_pos")}; batches = 0
         for batch in train_loader:
             optimizer.zero_grad(set_to_none=True); context = torch.autocast(device.type) if scaler.is_enabled() else nullcontext()
             with context:
@@ -87,6 +87,7 @@ def main(args=None):
                "avg_obj_loss": sums["obj_loss"] / max(batches, 1),
                "avg_box_loss": sums["box_loss"] / max(batches, 1),
                "avg_cls_loss": sums["cls_loss"] / max(batches, 1),
+               "num_pos": sums["num_pos"] / max(batches, 1),
                "learning_rate": optimizer.param_groups[0]["lr"], "val_precision": metrics["precision"],
                "val_recall": metrics["recall"], "val_AP50": metrics["AP50"],
                "val_mAP50_95": metrics["mAP50_95"]}
