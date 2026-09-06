@@ -52,9 +52,19 @@ python detection/scripts/eval_psmaf_yolo_m3fd.py \
   --split test --device cuda:0 --project runs/detect --name psmaf-yolo-test
 ```
 
-Training writes `metrics.json`/`metrics.csv`; evaluation writes
-`bbox_metrics.json`/`bbox_metrics.csv`. Both include precision, recall, mAP50,
-mAP50:95, and per-class AP fields. Run artifacts and weights are git-ignored.
+Training and evaluation both write `metrics.json`/`metrics.csv`. PSMAF-YOLO
+uses a real multi-head detection evaluator: P3, P4, and P5 predictions are
+decoded into image coordinates, merged, confidence-filtered, and processed by
+class-aware NMS. Precision and recall use class-and-IoU matching; AP50, mAP50,
+mAP50:95, and per-class AP are computed from ranked precision-recall curves.
+In particular, mAP is not a `precision * recall` proxy. Run artifacts and
+weights are git-ignored.
+
+Resume the latest run checkpoint with `--resume` or `--resume auto`, or select
+an exact checkpoint with `--resume /path/to/checkpoint.pt`. Resume restores the
+model, optimizer, AMP scaler, and next epoch; `--weights` only initializes model
+weights for a new run. If both are supplied, `--resume` takes precedence with a
+warning.
 
 ## Ablations
 
