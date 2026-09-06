@@ -5,6 +5,7 @@ import argparse
 from contextlib import nullcontext
 from pathlib import Path
 import sys
+import warnings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -40,20 +41,39 @@ def main(args=None):
     kwargs = dict(batch_size=args.batch, num_workers=args.workers, collate_fn=paired_collate_fn)
     train_loader = DataLoader(train, shuffle=True, **kwargs); val_loader = DataLoader(val, **kwargs)
     model = PSMAFYOLO(config["nc"], fusion_mode=args.fusion_mode, use_psg=not args.no_psg, use_msaf=not args.no_msaf).to(device)
-    checkpoint = args.weights or (output / "last.pt" if args.resume else None)
+    if args.resume and args.weights:
+        warnings.warn("--resume takes precedence over --weights", stacklevel=1)
+    checkpoint = (output / "last.pt" if args.resume == "auto" else Path(args.resume)) if args.resume else args.weights
     start = 0
-    if checkpoint and Path(checkpoint).is_file():
-        state = torch.load(checkpoint, map_location=device, weights_only=False); model.load_state_dict(state.get("model", state)); start = state.get("epoch", -1) + 1
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3); scaler = torch.amp.GradScaler("cuda", enabled=args.amp and device.type == "cuda")
+    if checkpoint:
+        checkpoint = Path(checkpoint)
+        if not checkpoint.is_file():
+            raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+        print(f"Loading checkpoint: {checkpoint}")
+        state = torch.load(checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(state.get("model", state))
+        if args.resume:
+            start = state.get("epoch", -1) + 1
+            if "optimizer" in state:
+                optimizer.load_state_dict(state["optimizer"])
+            else:
+                warnings.warn("checkpoint has no optimizer state; using a fresh optimizer", stacklevel=1)
+            if "scaler" in state:
+                scaler.load_state_dict(state["scaler"])
+            else:
+                warnings.warn("checkpoint has no AMP scaler state; using a fresh scaler", stacklevel=1)
     for epoch in range(start, args.epochs):
         model.train()
         for batch in train_loader:
             optimizer.zero_grad(set_to_none=True); context = torch.autocast(device.type) if scaler.is_enabled() else nullcontext()
             with context: loss = detection_loss(model(batch["rgb"].to(device), batch["ir"].to(device)), batch["labels"].to(device), config["nc"])
             scaler.scale(loss).backward(); scaler.step(optimizer); scaler.update()
-        state = {"model": model.state_dict(), "epoch": epoch, "args": vars(args)}; torch.save(state, output / "last.pt")
+        metrics = evaluate(model, val_loader, device)
+        state = {"model": model.state_dict(), "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(),
+                 "epoch": epoch, "args": vars(args), "metrics": metrics}; torch.save(state, output / "last.pt")
         if args.save_period > 0 and (epoch + 1) % args.save_period == 0: torch.save(state, output / f"epoch{epoch + 1}.pt")
-        save_metrics(evaluate(model, val_loader, device), output, "metrics")
+        save_metrics(metrics, output, "metrics")
 
 
 if __name__ == "__main__": main()

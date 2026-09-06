@@ -32,7 +32,7 @@ def main(args=None):
     model = PSMAFYOLO(cfg["nc"], fusion_mode=args.fusion_mode, use_psg=not args.no_psg, use_msaf=not args.no_msaf).to(device)
     state = torch.load(args.weights, map_location=device, weights_only=False); model.load_state_dict(state.get("model", state))
     loader = DataLoader(M3FDPairedDataset(root, cfg[args.split], args.imgsz), batch_size=args.batch, num_workers=args.workers, collate_fn=paired_collate_fn)
-    metrics = evaluate(model, loader, device); save_metrics(metrics, Path(args.project) / args.name); print(metrics)
+    metrics = evaluate(model, loader, device); save_metrics(metrics, Path(args.project) / args.name, "metrics"); print(metrics)
 
 
 if __name__ == "__main__": main()
