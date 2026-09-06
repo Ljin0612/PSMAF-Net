@@ -29,6 +29,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset-root", required=True, type=Path)
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--freeze-backbone", action="store_true")
+    parser.add_argument(
+        "--amp", action="store_true", help="Enable Detectron2 AMP training."
+    )
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action="store_true",
+        help="Checkpoint UNIV blocks3 to reduce fine-tuning activation memory.",
+    )
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--eval-every-epochs", type=int, default=1)
     parser.add_argument("--device", default="cuda")
@@ -53,7 +61,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_trainer():
     try:
+        import torch
         from detectron2.engine import DefaultTrainer
+        from detectron2.engine.hooks import HookBase
         from detectron2.evaluation import COCOEvaluator
     except ImportError as exc:
         raise ImportError(
@@ -61,7 +71,52 @@ def build_trainer():
             "build compatible with the active PyTorch and CUDA versions."
         ) from exc
 
+    def log_cuda_memory(label: str) -> None:
+        if not torch.cuda.is_available():
+            print(f"CUDA memory [{label}]: unavailable (CUDA is not available)")
+            return
+        device = torch.cuda.current_device()
+        mib = 1024**2
+        print(
+            f"CUDA memory [{label}]: "
+            f"allocated={torch.cuda.memory_allocated(device) / mib:.1f} MiB "
+            f"reserved={torch.cuda.memory_reserved(device) / mib:.1f} MiB "
+            f"peak_allocated={torch.cuda.max_memory_allocated(device) / mib:.1f} MiB"
+        )
+
+    class FirstBackwardMemoryHook(HookBase):
+        def __init__(self) -> None:
+            self.logged = False
+
+        def after_step(self) -> None:
+            if not self.logged:
+                log_cuda_memory("first backward")
+                self.logged = True
+
     class M3FDUNIVTrainer(DefaultTrainer):
+        @classmethod
+        def build_model(cls, cfg):
+            model = super().build_model(cfg)
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+            log_cuda_memory("model build")
+
+            handle = None
+
+            def log_first_forward(_module, _inputs, _output):
+                nonlocal handle
+                log_cuda_memory("first forward")
+                if handle is not None:
+                    handle.remove()
+
+            handle = model.register_forward_hook(log_first_forward)
+            return model
+
+        def build_hooks(self):
+            hooks = super().build_hooks()
+            hooks.append(FirstBackwardMemoryHook())
+            return hooks
+
         @classmethod
         def build_evaluator(cls, cfg, dataset_name, output_folder=None):
             output_folder = output_folder or str(Path(cfg.OUTPUT_DIR) / "eval")
@@ -110,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  dataset_root: {dataset_root}")
         print(f"  checkpoint: {checkpoint}")
         print(f"  freeze_backbone: {args.freeze_backbone}")
+        print(f"  amp: {args.amp}")
+        print(f"  gradient_checkpointing: {args.gradient_checkpointing}")
         print(f"  device: {args.device}")
         print("dry_run: no files generated and no training started")
         return 0
@@ -155,9 +212,11 @@ def main(argv: list[str] | None = None) -> int:
     cfg.DATALOADER.NUM_WORKERS = 0
     cfg.MODEL.UNIV.CHECKPOINT = str(checkpoint)
     cfg.MODEL.UNIV.FREEZE = bool(args.freeze_backbone)
+    cfg.MODEL.UNIV.GRADIENT_CHECKPOINTING = bool(args.gradient_checkpointing)
     cfg.MODEL.DEVICE = args.device
     cfg.MODEL.WEIGHTS = ""
     cfg.SOLVER.IMS_PER_BATCH = int(args.ims_per_batch)
+    cfg.SOLVER.AMP.ENABLED = bool(args.amp)
     cfg.SOLVER.MAX_ITER = int(schedule.max_iter)
     cfg.SOLVER.CHECKPOINT_PERIOD = int(schedule.checkpoint_period)
     cfg.TEST.EVAL_PERIOD = int(schedule.eval_period)
@@ -172,6 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         "baseline": "UNIV-original",
         "checkpoint": str(checkpoint),
         "freeze_backbone": bool(args.freeze_backbone),
+        "amp": bool(args.amp),
+        "gradient_checkpointing": bool(args.gradient_checkpointing),
         "device": args.device,
         "max_iter": schedule.max_iter,
         "epochs": schedule.epochs,

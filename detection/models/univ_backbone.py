@@ -9,6 +9,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 try:
     from detectron2.config import CfgNode as CN
@@ -28,6 +29,7 @@ def add_univ_config(cfg: CN) -> None:
     cfg.MODEL.UNIV = CN()
     cfg.MODEL.UNIV.CHECKPOINT = ""
     cfg.MODEL.UNIV.FREEZE = False
+    cfg.MODEL.UNIV.GRADIENT_CHECKPOINTING = False
     cfg.MODEL.UNIV.PRETRAIN_IMAGE_SIZE = 224
     cfg.MODEL.UNIV.OUT_CHANNELS = 256
     cfg.MODEL.UNIV.DROP_PATH_RATE = 0.2
@@ -112,6 +114,7 @@ class UNIVBackbone(Backbone):
         }
         self._out_feature_strides = dict(zip(FEATURE_NAMES, FEATURE_STRIDES))
         self._size_divisibility = 32
+        self.gradient_checkpointing = bool(univ_cfg.GRADIENT_CHECKPOINTING)
         self.checkpoint_report: dict[str, Any] | None = None
 
         if univ_cfg.CHECKPOINT:
@@ -222,9 +225,26 @@ class UNIVBackbone(Backbone):
         position = position.flatten(2).transpose(1, 2)
         x = x + position
         for block in self.encoder.blocks3:
-            x = block(x)
+            if self.gradient_checkpointing and self.training and x.requires_grad:
+                # Attention in blocks3 dominates activation memory at detector
+                # resolutions. Recompute it during backward instead of retaining
+                # every intermediate activation from the forward pass.
+                x = checkpoint(block, x, use_reentrant=False)
+            else:
+                x = block(x)
         p4 = self.encoder.norm(x).transpose(1, 2).reshape(-1, 768, height, width)
         return p2, p3, p4.contiguous()
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        return self.feature_adapter(self._encoder_stages(x))
+        encoder_frozen = not any(
+            parameter.requires_grad for parameter in self.encoder.parameters()
+        )
+        if encoder_frozen:
+            # requires_grad=False alone still records operations when the input
+            # requires gradients. no_grad guarantees a frozen encoder retains no
+            # backward graph while keeping the trainable adapter outside it.
+            with torch.no_grad():
+                stages = self._encoder_stages(x)
+        else:
+            stages = self._encoder_stages(x)
+        return self.feature_adapter(stages)

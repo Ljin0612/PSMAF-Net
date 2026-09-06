@@ -82,6 +82,17 @@ python detection/scripts/run_m3fd_univ_fasterrcnn.py \
 ```
 
 Add `--freeze-backbone` for frozen-encoder training. Omit it to fine-tune UNIV.
+Add `--amp` to enable Detectron2 mixed-precision training, and add
+`--gradient-checkpointing` to recompute the high-level UNIV `blocks3` Transformer
+activations during backward. These options can be combined. The runner prints
+CUDA allocated, reserved, and peak-allocated memory after model construction,
+the first forward, and the first backward.
+
+An RTX 2080 Ti with 11 GB of VRAM may run out of memory at `--input-size 1024`
+when fully fine-tuning the encoder, even with batch size 1. Start validation with
+a `--input-size 640` smoke test (preferably with `--amp` and
+`--gradient-checkpointing`). A frozen baseline retains no encoder autograd graph,
+so `--freeze-backbone` is the mode to try first at 1024.
 
 The runner validates the train/test dataset layouts, creates bbox-only COCO JSON,
 registers both datasets, loads the UNIV checkpoint during model construction, and
@@ -96,6 +107,9 @@ python detection/scripts/run_m3fd_univ_fasterrcnn.py \
   --dataset-root /path/to/M3FD \
   --checkpoint /path/to/univ_checkpoint.pth \
   --smoke-test \
+  --input-size 640 \
+  --amp \
+  --gradient-checkpointing \
   --eval-every-epochs 0 \
   --device cuda \
   --work-dir outputs/detection/m3fd_univ_smoke
