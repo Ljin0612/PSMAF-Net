@@ -17,6 +17,8 @@ def test_univ_runner_exposes_required_arguments():
             "--checkpoint",
             "/models/univ.pth",
             "--freeze-backbone",
+            "--amp",
+            "--gradient-checkpointing",
             "--epochs",
             "5",
             "--eval-every-epochs",
@@ -29,6 +31,8 @@ def test_univ_runner_exposes_required_arguments():
     assert args.dataset_root == Path("/data/M3FD")
     assert args.checkpoint == Path("/models/univ.pth")
     assert args.freeze_backbone is True
+    assert args.amp is True
+    assert args.gradient_checkpointing is True
     assert args.epochs == 5
     assert args.eval_every_epochs == 2
     assert args.device == "cpu"
@@ -71,4 +75,5 @@ def test_univ_adapter_does_not_modify_vendored_source_contract():
 
     assert "third_party.UNIV.models.backbone.mcmae.vision_transformer" in source
     assert "class UNIVBackbone(Backbone):" in source
-    assert 'return self.feature_adapter(self._encoder_stages(x))' in source
+    assert "with torch.no_grad():" in source
+    assert "checkpoint(block, x, use_reentrant=False)" in source
