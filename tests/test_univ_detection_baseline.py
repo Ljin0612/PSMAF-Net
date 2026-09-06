@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -10,6 +11,7 @@ from detection.scripts.run_m3fd_univ_fasterrcnn import (
     has_bbox_metrics,
     parse_args,
     resolve_evaluation_results,
+    sanitize_json_numbers,
     should_run_fallback_eval,
 )
 
@@ -160,6 +162,32 @@ def test_univ_runner_accepts_flat_bbox_results_as_fallback():
     assert metrics["AP"] == 1.0
     assert metrics["AP50"] == 2.0
     assert metrics["AP75"] == 3.0
+
+
+def test_univ_runner_normalizes_undefined_metrics_for_strict_json():
+    results = {"bbox": {"AP": float("nan"), "AP50": float("inf"), "AP75": 3}}
+
+    metrics = format_bbox_metrics(results)
+
+    assert metrics["AP"] is None
+    assert metrics["AP50"] is None
+    assert metrics["AP75"] == 3.0
+    assert json.loads(json.dumps(metrics, allow_nan=False)) == metrics
+
+
+def test_univ_runner_does_not_treat_non_finite_values_as_evaluation():
+    assert has_bbox_metrics({"bbox": {"AP": float("nan")}}) is False
+    assert has_bbox_metrics({"bbox": {"AP": "12.3"}}) is False
+    assert has_bbox_metrics({"bbox": {"AP": False}}) is False
+
+
+def test_univ_runner_sanitizes_nested_raw_results_for_json():
+    sanitized = sanitize_json_numbers(
+        {"bbox": {"AP": float("nan")}, "details": [1, float("-inf")]}
+    )
+
+    assert sanitized == {"bbox": {"AP": None}, "details": [1.0, None]}
+    assert json.loads(json.dumps(sanitized, allow_nan=False)) == sanitized
 
 
 def test_univ_runner_recognizes_existing_bbox_metrics(fake_detectron_comm):
