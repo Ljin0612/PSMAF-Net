@@ -1,45 +1,38 @@
-"""PSMAF fusion interface placeholders.
+"""Task-independent, multi-level PSMAF fusion wrapper."""
 
-The fusion module composes core PSMAF building blocks without depending on any
-specific detection head or segmentation head.
-"""
+from collections.abc import Sequence
 
+import torch
 from torch import nn
 
-from .multiscale_adaptation import MultiScaleAdaptation
-from .pseudo_semantic_guidance import PseudoSemanticGuidance
+from .multiscale_adaptive_fusion import MultiScaleAdaptiveFusion
 
 
 class PSMAFFusion(nn.Module):
-    """Placeholder interface for PSMAF feature fusion.
+    """Fuse aligned pyramid levels for detection or segmentation."""
 
-    The class wires pseudo-semantic guidance and multi-scale adaptation behind a
-    shared core interface.  The current implementation preserves input/output
-    behavior so future detection and segmentation pipelines can call the same
-    ``core/psmaf`` feature interface without task-specific coupling.
-    """
-
-    def __init__(self):
-        """Create placeholder PSMAF submodules."""
+    def __init__(self, channels: Sequence[int], use_psg=True, use_msaf=True, fusion_mode="psmaf"):
         super().__init__()
-        self.pseudo_semantic_guidance = PseudoSemanticGuidance()
-        self.multiscale_adaptation = MultiScaleAdaptation()
+        if fusion_mode not in {"psmaf", "add", "concat"}:
+            raise ValueError("fusion_mode must be one of: psmaf, add, concat")
+        self.channels = tuple(channels)
+        self.use_msaf = use_msaf
+        self.fusion_mode = fusion_mode
+        self.levels = nn.ModuleList([MultiScaleAdaptiveFusion(c, use_psg) for c in channels])
+        self.concat_projections = nn.ModuleList([nn.Conv2d(2 * c, c, 1) for c in channels])
 
-    def forward(self, rgb_feat, ir_feat, pseudo_semantic_prior=None):
-        """Return fused-feature placeholders without changing inputs.
-
-        Args:
-            rgb_feat: RGB modality features from an upstream backbone.
-            ir_feat: Infrared modality features from an upstream backbone.
-            pseudo_semantic_prior: Optional pseudo-semantic prior reserved for
-                future guided alignment.
-
-        Returns:
-            dict: Unmodified features from the placeholder PSMAF interface.
-        """
-        guided_features = self.pseudo_semantic_guidance(
-            rgb_feat=rgb_feat,
-            ir_feat=ir_feat,
-            pseudo_semantic_prior=pseudo_semantic_prior,
-        )
-        return self.multiscale_adaptation(guided_features)
+    def forward(self, rgb_features, ir_features):
+        if len(rgb_features) != len(self.channels) or len(ir_features) != len(self.channels):
+            raise ValueError(f"expected {len(self.channels)} RGB and IR feature levels")
+        fused = []
+        for rgb, ir, adaptive, projection in zip(rgb_features, ir_features, self.levels, self.concat_projections):
+            if rgb.shape != ir.shape:
+                raise ValueError("corresponding RGB and IR feature levels must match")
+            if self.fusion_mode == "concat":
+                value = projection(torch.cat((rgb, ir), dim=1))
+            elif self.fusion_mode == "add" or not self.use_msaf:
+                value = rgb + ir
+            else:
+                value = adaptive(rgb, ir)
+            fused.append(value)
+        return tuple(fused)
