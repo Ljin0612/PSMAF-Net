@@ -98,6 +98,30 @@ The runner validates the train/test dataset layouts, creates bbox-only COCO JSON
 registers both datasets, loads the UNIV checkpoint during model construction, and
 converts the requested epoch count into Detectron2 iterations.
 
+## Debugging low AP
+
+For a quick memorization test, restrict training to a deterministic prefix of the
+training set and evaluate that same subset after the final optimizer step:
+
+```bash
+python detection/scripts/run_m3fd_univ_fasterrcnn.py \
+  --dataset-root /path/to/M3FD \
+  --checkpoint /path/to/univ_checkpoint.pth \
+  --debug-num-images 16 \
+  --eval-train \
+  --save-visualizations 8 \
+  --epochs 20 \
+  --work-dir outputs/detection/m3fd_univ_overfit
+```
+
+`--debug-num-images N` changes only the registered training dataset and epoch
+schedule; the generated COCO annotations and test split remain unchanged.
+`--eval-train` writes `raw_train_eval_results.json` and
+`train_bbox_metrics.json`. `--save-visualizations N` runs final inference on the
+first N test images and writes side-by-side panels under
+`WORK_DIR/debug_visualizations/`. Ground-truth boxes and labels are green;
+predicted boxes, class labels, and confidence scores are red.
+
 ## Ten-iteration smoke test
 
 Use the same real M3FD data and UNIV checkpoint as the full baseline:

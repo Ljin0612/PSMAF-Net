@@ -58,7 +58,121 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Force a 10-iteration checkpoint/forward/loss/backward smoke run.",
     )
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--eval-train",
+        action="store_true",
+        help="Evaluate the final model on the (possibly debug-limited) training split.",
+    )
+    parser.add_argument(
+        "--debug-num-images",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Train on only the first N training images for quick overfitting tests.",
+    )
+    parser.add_argument(
+        "--save-visualizations",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Save prediction-vs-GT panels for N test images after evaluation.",
+    )
+    args = parser.parse_args(argv)
+    if args.debug_num_images is not None and args.debug_num_images <= 0:
+        parser.error("--debug-num-images must be greater than zero")
+    if args.save_visualizations < 0:
+        parser.error("--save-visualizations must be non-negative")
+    return args
+
+
+def register_debug_subset(source_name: str, subset_name: str, num_images: int) -> str:
+    """Register a deterministic prefix of a Detectron2 dataset."""
+    from detectron2.data import DatasetCatalog, MetadataCatalog
+
+    records = DatasetCatalog.get(source_name)[:num_images]
+    DatasetCatalog.register(subset_name, lambda records=records: records)
+    metadata = MetadataCatalog.get(source_name).as_dict()
+    metadata.pop("name", None)
+    MetadataCatalog.get(subset_name).set(**metadata)
+    print(f"debug subset: {subset_name} uses {len(records)} of " f"{source_name}")
+    return subset_name
+
+
+def save_prediction_visualizations(cfg, model, dataset_name: str, count: int) -> None:
+    """Save side-by-side GT (green) and prediction (red, scored) panels."""
+    if count <= 0:
+        return
+
+    import cv2
+    import torch
+    from detectron2.data import DatasetCatalog, DatasetMapper
+    from detectron2.evaluation.evaluator import inference_context
+
+    output_dir = Path(cfg.OUTPUT_DIR).parent / "debug_visualizations"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mapper_cfg = cfg.clone()
+    mapper_cfg.defrost()
+    mapper_cfg.INPUT.RANDOM_FLIP = "none"
+    mapper_cfg.freeze()
+    # The training mapper retains transformed annotations as Instances. The model
+    # is in inference mode below, so those instances are ignored for prediction.
+    mapper = DatasetMapper(mapper_cfg, is_train=True)
+    records = DatasetCatalog.get(dataset_name)[:count]
+
+    def draw_boxes(image, boxes, labels, color):
+        canvas = image.copy()
+        for box, label in zip(boxes, labels):
+            x1, y1, x2, y2 = (int(round(value)) for value in box)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                canvas,
+                label,
+                (x1, max(14, y1 - 4)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+        return canvas
+
+    with inference_context(model), torch.no_grad():
+        for index, record in enumerate(records):
+            mapped = mapper(record)
+            prediction = model([mapped])[0]["instances"].to("cpu")
+            image = mapped["image"].permute(1, 2, 0).cpu().numpy().copy()
+            gt = mapped["instances"].to("cpu")
+            gt_labels = [f"GT {THING_CLASSES[int(cls)]}" for cls in gt.gt_classes]
+            pred_labels = [
+                f"{THING_CLASSES[int(cls)]} {float(score):.2f}"
+                for cls, score in zip(prediction.pred_classes, prediction.scores)
+            ]
+            gt_panel = draw_boxes(image, gt.gt_boxes.tensor, gt_labels, (0, 255, 0))
+            pred_panel = draw_boxes(
+                image, prediction.pred_boxes.tensor, pred_labels, (0, 0, 255)
+            )
+            cv2.putText(
+                gt_panel,
+                "GROUND TRUTH",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),
+                2,
+            )
+            cv2.putText(
+                pred_panel,
+                "PREDICTIONS",
+                (10, 25),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 255),
+                2,
+            )
+            panel = cv2.hconcat([gt_panel, pred_panel])
+            stem = Path(record["file_name"]).stem
+            cv2.imwrite(str(output_dir / f"{index:04d}_{stem}.jpg"), panel)
+    print(f"saved {len(records)} prediction visualizations to {output_dir}")
 
 
 def build_trainer():
@@ -241,6 +355,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  freeze_backbone: {args.freeze_backbone}")
         print(f"  amp: {args.amp}")
         print(f"  gradient_checkpointing: {args.gradient_checkpointing}")
+        print(f"  eval_train: {args.eval_train}")
+        print(f"  debug_num_images: {args.debug_num_images}")
+        print(f"  save_visualizations: {args.save_visualizations}")
         print(f"  device: {args.device}")
         print("dry_run: no files generated and no training started")
         return 0
@@ -251,8 +368,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"test conversion: {test_stats}")
 
     exact_iterations = 10 if args.smoke_test else args.max_iter
+    num_train_images = int(train_stats["num_images"])
+    if args.debug_num_images is not None:
+        num_train_images = min(num_train_images, args.debug_num_images)
     schedule = compute_epoch_schedule(
-        num_train_images=int(train_stats["num_images"]),
+        num_train_images=num_train_images,
         ims_per_batch=args.ims_per_batch,
         max_iter=exact_iterations or 1,
         epochs=None if exact_iterations is not None else args.epochs,
@@ -274,6 +394,11 @@ def main(argv: list[str] | None = None) -> int:
 
     register_m3fd_coco("m3fd_ir_train_univ", str(dataset_root / "ir"), str(train_json))
     register_m3fd_coco("m3fd_ir_test_univ", str(dataset_root / "ir"), str(test_json))
+    train_dataset_name = "m3fd_ir_train_univ"
+    if args.debug_num_images is not None:
+        train_dataset_name = register_debug_subset(
+            train_dataset_name, "m3fd_ir_train_univ_debug", args.debug_num_images
+        )
 
     cfg = get_cfg()
     add_univ_config(cfg)
@@ -281,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
     )
     cfg.merge_from_file(str(REPO_ROOT / "configs/detection/univ_fasterrcnn_m3fd.yaml"))
-    cfg.DATASETS.TRAIN = ("m3fd_ir_train_univ",)
+    cfg.DATASETS.TRAIN = (train_dataset_name,)
     cfg.DATASETS.TEST = ("m3fd_ir_test_univ",)
     cfg.DATALOADER.NUM_WORKERS = 0
     cfg.MODEL.UNIV.CHECKPOINT = str(checkpoint)
@@ -312,6 +437,9 @@ def main(argv: list[str] | None = None) -> int:
         "epochs": schedule.epochs,
         "eval_period": schedule.eval_period,
         "annotation_type": "bbox_only",
+        "eval_train": bool(args.eval_train),
+        "debug_num_images": args.debug_num_images,
+        "save_visualizations": args.save_visualizations,
     }
     (work_dir / "runtime.json").write_text(json.dumps(runtime, indent=2), encoding="utf-8")
 
@@ -328,6 +456,21 @@ def main(argv: list[str] | None = None) -> int:
     if should_run_fallback_eval(results):
         results = trainer_class.test(cfg, trainer.model)
 
+    train_results = None
+    if args.eval_train:
+        train_eval_cfg = cfg.clone()
+        train_eval_cfg.defrost()
+        train_eval_cfg.DATASETS.TEST = (train_dataset_name,)
+        train_eval_cfg.freeze()
+        evaluator = trainer_class.build_evaluator(
+            train_eval_cfg,
+            train_dataset_name,
+            str(work_dir / "detectron2_output" / "eval_train"),
+        )
+        train_results = trainer_class.test(
+            train_eval_cfg, trainer.model, evaluators=[evaluator]
+        )
+
     from detectron2.utils import comm
 
     if comm.is_main_process():
@@ -340,6 +483,29 @@ def main(argv: list[str] | None = None) -> int:
         )
         (work_dir / "bbox_metrics.json").write_text(
             json.dumps(metrics, indent=2, allow_nan=False), encoding="utf-8"
+        )
+
+        if train_results is not None:
+            print(f"raw training-split evaluation results: {train_results}")
+            (work_dir / "raw_train_eval_results.json").write_text(
+                json.dumps(
+                    sanitize_json_numbers(train_results), indent=2, allow_nan=False
+                ),
+                encoding="utf-8",
+            )
+            (work_dir / "train_bbox_metrics.json").write_text(
+                json.dumps(
+                    format_bbox_metrics(train_results), indent=2, allow_nan=False
+                ),
+                encoding="utf-8",
+            )
+
+        visualization_model = getattr(trainer.model, "module", trainer.model)
+        save_prediction_visualizations(
+            cfg,
+            visualization_model,
+            "m3fd_ir_test_univ",
+            args.save_visualizations,
         )
 
         print("UNIV-original bbox metrics:")
