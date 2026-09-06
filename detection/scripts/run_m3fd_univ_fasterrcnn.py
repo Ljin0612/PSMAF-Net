@@ -147,11 +147,46 @@ def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | Non
     return {name: bbox.get(name) for name in names}
 
 
+def get_bbox_result(results):
+    """Return the bbox metrics mapping from flat or Detectron2-style results."""
+    if not isinstance(results, dict):
+        return {}
+    bbox = results.get("bbox", results)
+    return bbox if isinstance(bbox, dict) else {}
+
+
+def has_bbox_metrics(results):
+    """Whether results contain at least one standard COCO bbox metric."""
+    bbox = get_bbox_result(results)
+    return any(
+        key in bbox and bbox[key] is not None for key in ("AP", "AP50", "AP75")
+    )
+
+
+def should_run_fallback_eval(results):
+    """Make rank zero's fallback decision authoritative for every worker."""
+    # Keep Detectron2 optional when this module is imported for argument parsing.
+    from detectron2.utils import comm
+
+    local_needs_eval = not has_bbox_metrics(results)
+
+    if comm.get_world_size() == 1:
+        return local_needs_eval
+
+    gathered = comm.all_gather(
+        {"rank": comm.get_rank(), "needs_eval": local_needs_eval}
+    )
+    main_state = next(item for item in gathered if item["rank"] == 0)
+    return bool(main_state["needs_eval"])
+
+
 def resolve_evaluation_results(trainer, trainer_class, cfg, results):
     """Recover evaluation results when ``train`` does not return hook output."""
-    if not results:
-        results = getattr(trainer, "_last_eval_results", None)
-    if not results:
+    if not has_bbox_metrics(results):
+        last_eval_results = getattr(trainer, "_last_eval_results", None)
+        if has_bbox_metrics(last_eval_results):
+            results = last_eval_results
+    if should_run_fallback_eval(results):
         results = trainer_class.test(cfg, trainer.model)
     return results
 
@@ -263,18 +298,31 @@ def main(argv: list[str] | None = None) -> int:
     trainer = trainer_class(cfg)
     trainer.resume_or_load(resume=False)
     results = trainer.train()
-    results = resolve_evaluation_results(trainer, trainer_class, cfg, results)
-    print(f"raw evaluation results: {results}")
-    (work_dir / "raw_eval_results.json").write_text(
-        json.dumps(results, indent=2), encoding="utf-8"
-    )
-    metrics = format_bbox_metrics(results)
-    print("UNIV-original bbox metrics:")
-    for name, value in metrics.items():
-        print(f"  {name}: {value}")
-    (work_dir / "bbox_metrics.json").write_text(
-        json.dumps(metrics, indent=2), encoding="utf-8"
-    )
+
+    if not has_bbox_metrics(results):
+        last_eval_results = getattr(trainer, "_last_eval_results", None)
+        if has_bbox_metrics(last_eval_results):
+            results = last_eval_results
+
+    if should_run_fallback_eval(results):
+        results = trainer_class.test(cfg, trainer.model)
+
+    from detectron2.utils import comm
+
+    if comm.is_main_process():
+        print(f"raw evaluation results: {results}")
+        metrics = format_bbox_metrics(results)
+
+        (work_dir / "raw_eval_results.json").write_text(
+            json.dumps(results, indent=2), encoding="utf-8"
+        )
+        (work_dir / "bbox_metrics.json").write_text(
+            json.dumps(metrics, indent=2), encoding="utf-8"
+        )
+
+        print("UNIV-original bbox metrics:")
+        for name, value in metrics.items():
+            print(f"  {name}: {value}")
     return 0
 
 
