@@ -63,9 +63,12 @@ class PSMAFYOLO(nn.Module):
         return self.neck_head(self.fusion(self.rgb_backbone(rgb), self.ir_backbone(ir)))
 
 
-def detection_loss(outputs, targets, nc=6):
+def detection_loss(outputs, targets, nc=6, return_components=False):
     """Lightweight anchor-free training loss for normalized YOLO targets."""
     total = outputs[0].new_zeros(())
+    total_obj = outputs[0].new_zeros(())
+    total_box = outputs[0].new_zeros(())
+    total_cls = outputs[0].new_zeros(())
     for level, prediction in enumerate(outputs):
         b, _, h, w = prediction.shape
         obj_target = prediction.new_zeros((b, h, w))
@@ -86,5 +89,10 @@ def detection_loss(outputs, targets, nc=6):
             box_loss = box_loss + F.smooth_l1_loss(cell[:4].sigmoid(), row[2:6])
             cls_loss = cls_loss + F.cross_entropy(cell[5:].unsqueeze(0), torch.tensor([cls], device=cell.device))
         obj_loss = F.binary_cross_entropy_with_logits(prediction[:, 4], obj_target)
-        total = total + obj_loss + (box_loss + cls_loss) / max(len(selected), 1)
+        normalizer = max(len(selected), 1)
+        box_loss, cls_loss = box_loss / normalizer, cls_loss / normalizer
+        total_obj, total_box, total_cls = total_obj + obj_loss, total_box + box_loss, total_cls + cls_loss
+        total = total + obj_loss + box_loss + cls_loss
+    if return_components:
+        return {"loss": total, "obj_loss": total_obj, "box_loss": total_box, "cls_loss": total_cls}
     return total
