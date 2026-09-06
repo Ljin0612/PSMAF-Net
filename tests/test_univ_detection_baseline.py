@@ -1,13 +1,38 @@
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 from detection.scripts.run_m3fd_univ_fasterrcnn import (
     format_bbox_metrics,
+    get_bbox_result,
+    has_bbox_metrics,
     parse_args,
     resolve_evaluation_results,
+    should_run_fallback_eval,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def fake_detectron_comm(monkeypatch):
+    """Install the optional Detectron2 communication module for unit tests."""
+    comm = SimpleNamespace(
+        get_world_size=lambda: 1,
+        get_rank=lambda: 0,
+        all_gather=lambda value: [value],
+        is_main_process=lambda: True,
+    )
+    detectron2 = ModuleType("detectron2")
+    utils = ModuleType("detectron2.utils")
+    utils.comm = comm
+    detectron2.utils = utils
+    monkeypatch.setitem(sys.modules, "detectron2", detectron2)
+    monkeypatch.setitem(sys.modules, "detectron2.utils", utils)
+    return comm
 
 
 def test_univ_runner_exposes_required_arguments():
@@ -76,7 +101,7 @@ def test_univ_runner_extracts_nested_detectron2_bbox_results():
     assert metrics["AP75"] == 3.0
 
 
-def test_univ_runner_uses_direct_nested_detectron2_result():
+def test_univ_runner_uses_direct_nested_detectron2_result(fake_detectron_comm):
     class TrainerClass:
         @classmethod
         def test(cls, cfg, model):
@@ -90,7 +115,9 @@ def test_univ_runner_uses_direct_nested_detectron2_result():
     assert results == direct
 
 
-def test_univ_runner_recovers_last_eval_results_when_train_returns_none():
+def test_univ_runner_recovers_last_eval_results_when_train_returns_none(
+    fake_detectron_comm,
+):
     class TrainerClass:
         @classmethod
         def test(cls, cfg, model):
@@ -106,7 +133,9 @@ def test_univ_runner_recovers_last_eval_results_when_train_returns_none():
     assert results == expected
 
 
-def test_univ_runner_runs_test_when_train_and_last_eval_results_are_missing():
+def test_univ_runner_runs_test_when_train_and_last_eval_results_are_missing(
+    fake_detectron_comm,
+):
     cfg = object()
     model = object()
     expected = {"bbox": {"AP": 4.0}}
@@ -131,6 +160,36 @@ def test_univ_runner_accepts_flat_bbox_results_as_fallback():
     assert metrics["AP"] == 1.0
     assert metrics["AP50"] == 2.0
     assert metrics["AP75"] == 3.0
+
+
+def test_univ_runner_recognizes_existing_bbox_metrics(fake_detectron_comm):
+    results = {"bbox": {"AP": 1.0, "AP50": 2.0}}
+
+    assert get_bbox_result(results) == results["bbox"]
+    assert has_bbox_metrics(results) is True
+    assert should_run_fallback_eval(results) is False
+
+
+def test_univ_runner_fallback_uses_rank_zero_decision(fake_detectron_comm):
+    fake_detectron_comm.get_world_size = lambda: 2
+    fake_detectron_comm.get_rank = lambda: 1
+    fake_detectron_comm.all_gather = lambda value: [
+        {"rank": 0, "needs_eval": False},
+        value,
+    ]
+
+    # Rank 1 has no local evaluator result, but must follow rank 0 and not evaluate.
+    assert should_run_fallback_eval({}) is False
+
+
+def test_univ_runner_final_json_writes_are_main_process_only():
+    source = (
+        ROOT / "detection/scripts/run_m3fd_univ_fasterrcnn.py"
+    ).read_text(encoding="utf-8")
+    guarded_block = source.split("if comm.is_main_process():", 1)[1]
+
+    assert 'work_dir / "raw_eval_results.json"' in guarded_block
+    assert 'work_dir / "bbox_metrics.json"' in guarded_block
 
 
 def test_univ_config_selects_registered_backbone_and_bbox_features():
