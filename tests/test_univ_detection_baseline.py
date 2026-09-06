@@ -53,6 +53,11 @@ def test_univ_runner_exposes_required_arguments():
             "2",
             "--device",
             "cpu",
+            "--eval-train",
+            "--debug-num-images",
+            "8",
+            "--save-visualizations",
+            "3",
         ]
     )
 
@@ -64,6 +69,26 @@ def test_univ_runner_exposes_required_arguments():
     assert args.epochs == 5
     assert args.eval_every_epochs == 2
     assert args.device == "cpu"
+    assert args.eval_train is True
+    assert args.debug_num_images == 8
+    assert args.save_visualizations == 3
+
+
+@pytest.mark.parametrize(
+    "option,value", [("--debug-num-images", "0"), ("--save-visualizations", "-1")]
+)
+def test_univ_runner_rejects_invalid_debug_counts(option, value):
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--dataset-root",
+                "/data/M3FD",
+                "--checkpoint",
+                "/models/univ.pth",
+                option,
+                value,
+            ]
+        )
 
 
 def test_univ_runner_reports_aggregate_and_per_class_ap():
@@ -218,6 +243,8 @@ def test_univ_runner_final_json_writes_are_main_process_only():
 
     assert 'work_dir / "raw_eval_results.json"' in guarded_block
     assert 'work_dir / "bbox_metrics.json"' in guarded_block
+    assert 'work_dir / "train_bbox_metrics.json"' in guarded_block
+    assert "save_prediction_visualizations(" in guarded_block
 
 
 def test_univ_config_selects_registered_backbone_and_bbox_features():
