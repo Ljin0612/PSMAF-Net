@@ -3,6 +3,7 @@ from pathlib import Path
 from detection.scripts.run_m3fd_univ_fasterrcnn import (
     format_bbox_metrics,
     parse_args,
+    resolve_evaluation_results,
 )
 
 
@@ -73,6 +74,55 @@ def test_univ_runner_extracts_nested_detectron2_bbox_results():
     assert metrics["AP"] == 1.0
     assert metrics["AP50"] == 2.0
     assert metrics["AP75"] == 3.0
+
+
+def test_univ_runner_uses_direct_nested_detectron2_result():
+    class TrainerClass:
+        @classmethod
+        def test(cls, cfg, model):
+            raise AssertionError("test fallback should not run")
+
+    trainer = type("Trainer", (), {"model": object()})()
+    direct = {"bbox": {"AP": 1.0, "AP50": 2.0}}
+
+    results = resolve_evaluation_results(trainer, TrainerClass, object(), direct)
+
+    assert results == direct
+
+
+def test_univ_runner_recovers_last_eval_results_when_train_returns_none():
+    class TrainerClass:
+        @classmethod
+        def test(cls, cfg, model):
+            raise AssertionError("test fallback should not run")
+
+    expected = {"bbox": {"AP": 3.0}}
+    trainer = type(
+        "Trainer", (), {"model": object(), "_last_eval_results": expected}
+    )()
+
+    results = resolve_evaluation_results(trainer, TrainerClass, object(), None)
+
+    assert results == expected
+
+
+def test_univ_runner_runs_test_when_train_and_last_eval_results_are_missing():
+    cfg = object()
+    model = object()
+    expected = {"bbox": {"AP": 4.0}}
+
+    class TrainerClass:
+        @classmethod
+        def test(cls, actual_cfg, actual_model):
+            assert actual_cfg is cfg
+            assert actual_model is model
+            return expected
+
+    trainer = type("Trainer", (), {"model": model})()
+
+    results = resolve_evaluation_results(trainer, TrainerClass, cfg, None)
+
+    assert results == expected
 
 
 def test_univ_runner_accepts_flat_bbox_results_as_fallback():
