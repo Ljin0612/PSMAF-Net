@@ -2,8 +2,9 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from core.psmaf import MultiScaleAdaptiveFusion, PSMAFFusion, PseudoSemanticGuidance
-from detection.models.psmaf_yolo import PSMAFYOLO
-from detection.scripts.psmaf_yolo_utils import decode_outputs, evaluate_detection, non_max_suppression
+from detection.models.psmaf_yolo import PSMAFYOLO, detection_loss
+from detection.scripts.psmaf_yolo_utils import (decode_outputs, evaluate, evaluate_detection,
+                                                limit_dataset, non_max_suppression, save_train_log_row)
 
 
 def test_pseudo_semantic_guidance_preserves_spatial_size():
@@ -71,3 +72,46 @@ def test_ap_uses_ranking_and_map_averages_iou_thresholds():
     assert metrics["AP50"] != pytest.approx(metrics["precision"] * metrics["recall"])
     assert 0 < metrics["mAP50_95"] < metrics["mAP50"]
     assert list(metrics["per_class_ap"]) == ["people", "car", "bus", "motorcycle", "lamp", "truck"]
+
+
+def test_detection_loss_returns_components():
+    outputs = tuple(torch.randn(1, 11, size, size, requires_grad=True) for size in (4, 2, 1))
+    result = detection_loss(outputs, torch.tensor([[0., 0., .5, .5, .1, .1]]), return_components=True)
+    assert set(result) == {"loss", "obj_loss", "box_loss", "cls_loss"}
+    torch.testing.assert_close(result["loss"], result["obj_loss"] + result["box_loss"] + result["cls_loss"])
+
+
+def test_train_log_row_can_be_created(tmp_path):
+    row = {"epoch": 1, "avg_total_loss": 3., "avg_obj_loss": 1., "avg_box_loss": 1.,
+           "avg_cls_loss": 1., "learning_rate": .001, "val_precision": 0., "val_recall": 0.,
+           "val_AP50": 0., "val_mAP50_95": 0.}
+    save_train_log_row(row, tmp_path)
+    assert (tmp_path / "train_log.csv").read_text().count("\n") == 2
+    assert '"epoch": 1' in (tmp_path / "train_log.jsonl").read_text()
+
+
+def test_debug_num_images_limits_dataset_size():
+    data = list(range(10))
+    assert len(limit_dataset(data, 3)) == 3
+    assert limit_dataset(data, 0) is data
+
+
+def test_confidence_threshold_changes_retained_predictions():
+    decoded = [torch.tensor([[0., 0., 1., 1., .2, 0.], [2., 2., 3., 3., .8, 0.]])]
+    assert len(non_max_suppression(decoded, .1)[0]) == 2
+    assert len(non_max_suppression(decoded, .5)[0]) == 1
+
+
+def test_evaluator_writes_box_diagnostics(tmp_path):
+    class Model(torch.nn.Module):
+        def forward(self, rgb, ir):
+            return (_encoded_head(2, active=True), _encoded_head(1), _encoded_head(1))
+    batch = {"rgb": torch.zeros(1, 3, 100, 100), "ir": torch.zeros(1, 3, 100, 100),
+             "labels": torch.tensor([[0., 0., .5, .5, .25, .25]])}
+    path = tmp_path / "eval_diagnostics.json"
+    evaluate(Model(), [batch], torch.device("cpu"), diagnostics_path=path)
+    import json
+    diagnostics = json.loads(path.read_text())
+    assert diagnostics["decoded_boxes"] == 6
+    assert diagnostics["boxes_after_confidence"] == 1
+    assert diagnostics["boxes_after_nms"] == 1

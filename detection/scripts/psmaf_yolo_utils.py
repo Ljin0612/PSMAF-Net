@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.utils.data import Subset
 
 
 NAMES = ["people", "car", "bus", "motorcycle", "lamp", "truck"]
@@ -29,6 +30,29 @@ def save_metrics(metrics, output_dir, stem="metrics"):
         writer = csv.DictWriter(handle, fieldnames=flat.keys())
         writer.writeheader()
         writer.writerow(flat)
+
+
+TRAIN_LOG_FIELDS = ("epoch", "avg_total_loss", "avg_obj_loss", "avg_box_loss", "avg_cls_loss",
+                    "learning_rate", "val_precision", "val_recall", "val_AP50", "val_mAP50_95")
+
+
+def save_train_log_row(row, output_dir):
+    """Append one epoch summary to the CSV and JSON-lines training logs."""
+    output = Path(output_dir); output.mkdir(parents=True, exist_ok=True)
+    normalized = {key: row[key] for key in TRAIN_LOG_FIELDS}
+    csv_path = output / "train_log.csv"
+    with csv_path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=TRAIN_LOG_FIELDS)
+        if handle.tell() == 0:
+            writer.writeheader()
+        writer.writerow(normalized)
+    with (output / "train_log.jsonl").open("a") as handle:
+        handle.write(json.dumps(normalized) + "\n")
+
+
+def limit_dataset(dataset, num_images):
+    """Return at most the first ``num_images`` samples (zero means unlimited)."""
+    return Subset(dataset, range(min(num_images, len(dataset)))) if num_images > 0 else dataset
 
 
 def xywh_to_xyxy(boxes):
@@ -177,15 +201,20 @@ def evaluate_detection(predictions, targets, class_names=NAMES, iou_thresholds=N
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, confidence_threshold=0.25, nms_iou_threshold=0.45):
+def evaluate(model, loader, device, confidence_threshold=0.25, nms_iou_threshold=0.45,
+             diagnostics_path=None):
     """Run multi-head inference and standards-based detection evaluation."""
     model.eval()
     all_predictions, all_targets = [], []
+    decoded_count = filtered_count = nms_count = 0
     for batch in loader:
         rgb = batch["rgb"].to(device)
         outputs = model(rgb, batch["ir"].to(device))
-        predictions = non_max_suppression(decode_outputs(outputs, rgb.shape[-2:]), confidence_threshold,
-                                          nms_iou_threshold)
+        decoded = decode_outputs(outputs, rgb.shape[-2:])
+        decoded_count += sum(len(rows) for rows in decoded)
+        filtered_count += sum(int((rows[:, 4] >= confidence_threshold).sum()) for rows in decoded)
+        predictions = non_max_suppression(decoded, confidence_threshold, nms_iou_threshold)
+        nms_count += sum(len(rows) for rows in predictions)
         labels = batch["labels"].to(device)
         scale = labels.new_tensor([rgb.shape[-1], rgb.shape[-2], rgb.shape[-1], rgb.shape[-2]])
         for batch_index in range(rgb.shape[0]):
@@ -193,4 +222,17 @@ def evaluate(model, loader, device, confidence_threshold=0.25, nms_iou_threshold
             boxes = xywh_to_xyxy(rows[:, 2:6] * scale) if len(rows) else labels.new_empty((0, 4))
             all_targets.append({"boxes": boxes, "classes": rows[:, 1].long()})
         all_predictions.extend(predictions)
-    return evaluate_detection(all_predictions, all_targets, NAMES)
+    metrics = evaluate_detection(all_predictions, all_targets, NAMES)
+    if diagnostics_path is not None:
+        _, tp, fp, gt_count = zip(*[_class_ap(all_predictions, all_targets, c, .5) for c in range(len(NAMES))])
+        diagnostics = {
+            "decoded_boxes": decoded_count, "boxes_after_confidence": filtered_count,
+            "boxes_after_nms": nms_count, "gt_boxes": sum(gt_count),
+            "tp_iou50": sum(tp), "fp_iou50": sum(fp), "fn_iou50": sum(gt_count) - sum(tp),
+            "per_class_gt_counts": {name: gt_count[c] for c, name in enumerate(NAMES)},
+            "per_class_prediction_counts": {name: sum(int((p[:, 5].long() == c).sum()) for p in all_predictions)
+                                            for c, name in enumerate(NAMES)},
+        }
+        path = Path(diagnostics_path); path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(diagnostics, indent=2))
+    return metrics

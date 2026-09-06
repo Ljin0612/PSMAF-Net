@@ -60,6 +60,34 @@ mAP50:95, and per-class AP are computed from ranked precision-recall curves.
 In particular, mAP is not a `precision * recall` proxy. Run artifacts and
 weights are git-ignored.
 
+## Debugging zero metrics
+
+A one-epoch end-to-end sanity run (including train-split evaluation) is:
+
+```bash
+python detection/scripts/train_psmaf_yolo_m3fd.py --dataset-root /data/M3FD_Detection \
+  --epochs 1 --eval-train --name sanity-1epoch
+```
+
+To deliberately overfit only the first 20 samples of both train and validation
+splits, use `--debug-num-images 20`. This mode is intended solely for debugging
+the input, loss, and evaluator pipeline and **must not be used for official
+reporting**:
+
+```bash
+python detection/scripts/train_psmaf_yolo_m3fd.py --dataset-root /data/M3FD_Detection \
+  --epochs 50 --debug-num-images 20 --eval-train --name overfit-20
+```
+
+If no prediction passes the default 0.25 confidence threshold, repeat with (for
+example) `--conf-thres 0.01`; `--nms-iou 0.45` can also be adjusted to diagnose
+suppression. Each run's `train_log.csv` and `train_log.jsonl` show total,
+objectness, box, and classification loss alongside learning rate and validation
+metrics for every epoch. `eval_diagnostics.json` reports decoded, confidence-
+filtered, and post-NMS box counts, GT count, IoU-0.50 TP/FP/FN, and per-class
+counts. With `--eval-train`, the latest split results are also written to
+`train_metrics.json` and `val_metrics.json`.
+
 Resume the latest run checkpoint with `--resume` or `--resume auto`, or select
 an exact checkpoint with `--resume /path/to/checkpoint.pt`. Resume restores the
 model, optimizer, AMP scaler, and next epoch; `--weights` only initializes model
