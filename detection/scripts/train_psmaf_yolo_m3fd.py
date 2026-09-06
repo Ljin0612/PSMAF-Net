@@ -101,6 +101,7 @@ def main(args=None):
                "avg_obj_loss": sums["obj_loss"] / max(batches, 1),
                "avg_box_loss": sums["box_loss"] / max(batches, 1),
                "avg_cls_loss": sums["cls_loss"] / max(batches, 1),
+               "num_pos": None,
                "learning_rate": optimizer.param_groups[0]["lr"], "val_precision": metrics["precision"],
                "val_recall": metrics["recall"], "val_AP50": metrics["AP50"],
                "val_mAP50_95": metrics["mAP50_95"]}

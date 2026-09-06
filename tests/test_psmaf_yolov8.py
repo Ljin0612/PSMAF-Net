@@ -1,3 +1,4 @@
+import csv
 import json
 
 import pytest
@@ -84,7 +85,17 @@ def test_yolov8_evaluator_writes_matching_diagnostics(tmp_path, monkeypatch):
 def test_yolov8_training_logs_num_pos(tmp_path):
     from detection.scripts.psmaf_yolo_utils import save_train_log_row
 
-    row = {"epoch": 1, "num_pos": 2.0}
+    row = {"epoch": 1, "avg_total_loss": 3.0, "avg_obj_loss": 1.0,
+           "avg_box_loss": 1.0, "avg_cls_loss": 1.0, "num_pos": 2.0,
+           "learning_rate": 0.001, "val_precision": 0.5, "val_recall": 0.6,
+           "val_AP50": 0.7, "val_mAP50_95": 0.4}
     save_train_log_row(row, tmp_path)
-    assert json.loads((tmp_path / "train_log.jsonl").read_text())["num_pos"] == 2.0
-    assert "num_pos" in (tmp_path / "train_log.csv").read_text().splitlines()[0]
+
+    with (tmp_path / "train_log.csv").open(newline="") as handle:
+        csv_row = next(csv.DictReader(handle))
+    jsonl_row = json.loads((tmp_path / "train_log.jsonl").read_text())
+
+    assert "num_pos" in csv_row
+    assert "num_pos" in jsonl_row
+    assert float(csv_row["num_pos"]) == row["num_pos"]
+    assert jsonl_row["num_pos"] == row["num_pos"]

@@ -87,8 +87,8 @@ def test_detection_loss_returns_components():
 
 def _train_log_row(epoch):
     return {"epoch": epoch, "avg_total_loss": 3., "avg_obj_loss": 1., "avg_box_loss": 1.,
-            "avg_cls_loss": 1., "learning_rate": .001, "val_precision": 0., "val_recall": 0.,
-            "val_AP50": 0., "val_mAP50_95": 0.}
+            "avg_cls_loss": 1., "num_pos": 2., "learning_rate": .001, "val_precision": 0.,
+            "val_recall": 0., "val_AP50": 0., "val_mAP50_95": 0.}
 
 
 @pytest.mark.parametrize("extra_args", [[], ["--weights", "pretrained.pt"]], ids=("scratch", "weights"))
