@@ -33,7 +33,8 @@ def save_metrics(metrics, output_dir, stem="metrics"):
 
 
 TRAIN_LOG_FIELDS = ("epoch", "avg_total_loss", "avg_obj_loss", "avg_box_loss", "avg_cls_loss",
-                    "learning_rate", "val_precision", "val_recall", "val_AP50", "val_mAP50_95")
+                    "num_pos", "learning_rate", "val_precision", "val_recall", "val_AP50",
+                    "val_mAP50_95")
 
 
 def reset_train_logs(output_dir):
