@@ -1,35 +1,31 @@
-"""Pseudo-semantic guidance module placeholders for PSMAF-Net.
+"""Label-free pseudo-semantic guidance for paired feature maps."""
 
-This module intentionally defines only a stable interface.  It must remain
-independent from downstream detection and segmentation heads so both tasks can
-reuse the same PSMAF feature outputs in later implementations.
-"""
-
+import torch
 from torch import nn
 
 
 class PseudoSemanticGuidance(nn.Module):
-    """Interface placeholder for pseudo-semantic guided cross-modal alignment.
+    """Estimate foreground attention and global modality reliability.
 
-    Future versions will use pseudo-semantic labels/priors to guide regional
-    alignment between RGB and infrared feature maps.  The current scaffold is an
-    identity pass-through that preserves inputs unchanged.
+    The estimates are learned only from the two feature tensors; no annotation is
+    an input to this module.
     """
 
-    def forward(self, rgb_feat, ir_feat, pseudo_semantic_prior=None):
-        """Return RGB and infrared features unchanged.
+    def __init__(self, channels: int, hidden_channels: int | None = None):
+        super().__init__()
+        hidden = hidden_channels or max(16, channels // 2)
+        self.shared = nn.Sequential(
+            nn.Conv2d(2 * channels, hidden, 3, padding=1, bias=False),
+            nn.BatchNorm2d(hidden),
+            nn.SiLU(inplace=True),
+        )
+        self.attention = nn.Conv2d(hidden, 1, 1)
+        self.reliability = nn.Conv2d(hidden, 2, 1)
 
-        Args:
-            rgb_feat: RGB modality features from an upstream backbone.
-            ir_feat: Infrared modality features from an upstream backbone.
-            pseudo_semantic_prior: Optional pseudo-semantic prior reserved for
-                future cross-modal region alignment.
-
-        Returns:
-            dict: Unmodified features and optional prior under stable keys.
-        """
-        return {
-            "rgb_feat": rgb_feat,
-            "ir_feat": ir_feat,
-            "pseudo_semantic_prior": pseudo_semantic_prior,
-        }
+    def forward(self, rgb_feat: torch.Tensor, ir_feat: torch.Tensor):
+        if rgb_feat.shape != ir_feat.shape:
+            raise ValueError(f"paired features must have equal shapes, got {rgb_feat.shape} and {ir_feat.shape}")
+        latent = self.shared(torch.cat((rgb_feat, ir_feat), dim=1))
+        attention = self.attention(latent).sigmoid()
+        reliability = self.reliability(latent).mean((2, 3), keepdim=True).softmax(dim=1)
+        return attention, reliability
