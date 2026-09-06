@@ -3,6 +3,16 @@
 This directory defines the object detection downstream-task entry point based on the
 original UNIV setting.
 
+## PSMAF detection implementations
+
+Two intentionally separate implementations are retained:
+
+- **compact PSMAF-YOLO v1** is the repository-local prototype used for fast
+  debugging and diagnostics;
+- **PSMAF-YOLOv8** is the YOLOv8-s-compatible branch intended for official
+  comparisons with the existing YOLOv8 experiments. See
+  [`../docs/psmaf_yolov8_detection.md`](../docs/psmaf_yolov8_detection.md).
+
 ## Scope
 
 The original UNIV paper evaluates object detection with **Mask R-CNN / Detectron2**.
