@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -133,8 +135,7 @@ def build_trainer():
 
 def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | None]:
     """Select the paper-facing aggregate and per-class bbox metrics."""
-    results = results or {}
-    bbox = results["bbox"] if "bbox" in results else results
+    bbox = get_bbox_result(results)
     names = (
         "AP",
         "AP50",
@@ -144,7 +145,27 @@ def format_bbox_metrics(results: dict[str, Any] | None) -> dict[str, float | Non
         "APl",
         *(f"AP-{name}" for name in THING_CLASSES),
     )
-    return {name: bbox.get(name) for name in names}
+    return {name: _finite_metric(bbox.get(name)) for name in names}
+
+
+def _finite_metric(value: Any) -> float | None:
+    """Return a finite numeric metric, normalizing undefined COCO values."""
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def sanitize_json_numbers(value: Any) -> Any:
+    """Recursively replace non-finite numbers so result JSON stays standards-compliant."""
+    if isinstance(value, dict):
+        return {key: sanitize_json_numbers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_json_numbers(item) for item in value]
+    if isinstance(value, Real) and not isinstance(value, bool):
+        number = float(value)
+        return number if math.isfinite(number) else None
+    return value
 
 
 def get_bbox_result(results):
@@ -156,10 +177,10 @@ def get_bbox_result(results):
 
 
 def has_bbox_metrics(results):
-    """Whether results contain at least one standard COCO bbox metric."""
+    """Whether results contain at least one finite standard COCO bbox metric."""
     bbox = get_bbox_result(results)
     return any(
-        key in bbox and bbox[key] is not None for key in ("AP", "AP50", "AP75")
+        _finite_metric(bbox.get(key)) is not None for key in ("AP", "AP50", "AP75")
     )
 
 
@@ -314,10 +335,11 @@ def main(argv: list[str] | None = None) -> int:
         metrics = format_bbox_metrics(results)
 
         (work_dir / "raw_eval_results.json").write_text(
-            json.dumps(results, indent=2), encoding="utf-8"
+            json.dumps(sanitize_json_numbers(results), indent=2, allow_nan=False),
+            encoding="utf-8",
         )
         (work_dir / "bbox_metrics.json").write_text(
-            json.dumps(metrics, indent=2), encoding="utf-8"
+            json.dumps(metrics, indent=2, allow_nan=False), encoding="utf-8"
         )
 
         print("UNIV-original bbox metrics:")
