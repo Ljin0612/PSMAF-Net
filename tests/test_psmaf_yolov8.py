@@ -8,9 +8,72 @@ torch = pytest.importorskip("torch")
 from detection.models.psmaf_yolov8 import PSMAFYOLOv8, load_yolov8s_weights
 from detection.scripts.psmaf_yolo_utils import limit_dataset
 from detection.scripts.psmaf_yolov8_utils import (METRIC_KEYS,
+                                                  ModelEMA,
+                                                  WarmupCosineScheduler,
                                                   evaluate_yolov8,
                                                   resolve_resume_path,
+                                                  set_backbones_trainable,
                                                   yolov8_detection_loss)
+
+
+class TinyDualModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.rgb_backbone = torch.nn.Linear(1, 1)
+        self.ir_backbone = torch.nn.Linear(1, 1)
+        self.fusion = torch.nn.Linear(1, 1)
+
+    def forward(self, rgb, ir):
+        return self.fusion(self.rgb_backbone(rgb) + self.ir_backbone(ir))
+
+
+def test_warmup_cosine_scheduler_changes_learning_rate():
+    parameter = torch.nn.Parameter(torch.ones(()))
+    optimizer = torch.optim.SGD([parameter], lr=0.1)
+    scheduler = WarmupCosineScheduler(optimizer, total_steps=10, warmup_steps=3, lrf=0.1)
+    rates = []
+    for _ in range(10):
+        rates.append(optimizer.param_groups[0]["lr"])
+        optimizer.step(); scheduler.step()
+    assert rates[0] < rates[2]
+    assert rates[-1] < rates[2]
+    assert len(set(rates)) > 3
+
+
+def test_ema_updates_and_model_can_be_evaluated():
+    model = TinyDualModel()
+    ema = ModelEMA(model)
+    with torch.no_grad():
+        model.fusion.weight.add_(1)
+    ema.update(model)
+    result = ema.ema(torch.ones(1, 1), torch.ones(1, 1))
+    assert result.shape == (1, 1)
+    assert not ema.ema.training
+    assert ema.updates == 1
+
+
+def test_freeze_backbones_then_unfreeze():
+    model = TinyDualModel()
+    set_backbones_trainable(model, False)
+    assert not any(parameter.requires_grad for parameter in model.rgb_backbone.parameters())
+    assert all(parameter.requires_grad for parameter in model.fusion.parameters())
+    set_backbones_trainable(model, True)
+    assert all(parameter.requires_grad for parameter in model.rgb_backbone.parameters())
+    assert all(parameter.requires_grad for parameter in model.ir_backbone.parameters())
+
+
+def test_checkpoint_round_trip_restores_ema(tmp_path):
+    model = TinyDualModel(); ema = ModelEMA(model)
+    with torch.no_grad():
+        model.fusion.bias.add_(2)
+    ema.update(model)
+    path = tmp_path / "checkpoint.pt"
+    torch.save({"model": model.state_dict(), "ema": ema.state_dict()}, path)
+    restored = ModelEMA(TinyDualModel())
+    restored.load_state_dict(torch.load(path, weights_only=False)["ema"])
+    assert restored.updates == ema.updates
+    assert all(torch.equal(a, b) for a, b in zip(ema.ema.state_dict().values(),
+                                                restored.ema.state_dict().values()))
 
 
 def test_psmaf_yolov8_forward_and_fusion_shapes():

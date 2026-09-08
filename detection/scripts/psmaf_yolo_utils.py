@@ -33,7 +33,8 @@ def save_metrics(metrics, output_dir, stem="metrics"):
 
 
 TRAIN_LOG_FIELDS = ("epoch", "avg_total_loss", "avg_obj_loss", "avg_box_loss", "avg_cls_loss",
-                    "num_pos", "learning_rate", "val_precision", "val_recall", "val_AP50",
+                    "num_pos", "learning_rate", "backbone_learning_rate", "base_learning_rate",
+                    "val_precision", "val_recall", "val_AP50",
                     "val_mAP50_95")
 
 
@@ -47,7 +48,7 @@ def reset_train_logs(output_dir):
 def save_train_log_row(row, output_dir):
     """Append one epoch summary to the CSV and JSON-lines training logs."""
     output = Path(output_dir); output.mkdir(parents=True, exist_ok=True)
-    normalized = {key: row[key] for key in TRAIN_LOG_FIELDS}
+    normalized = {key: row.get(key) for key in TRAIN_LOG_FIELDS}
     csv_path = output / "train_log.csv"
     with csv_path.open("a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=TRAIN_LOG_FIELDS)
