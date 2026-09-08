@@ -1,6 +1,8 @@
 """Loss, decoding, evaluation, and checkpoint helpers for PSMAF-YOLOv8."""
 
 import json
+import math
+from copy import deepcopy
 from pathlib import Path
 
 import torch
@@ -12,6 +14,86 @@ from detection.scripts.psmaf_yolo_utils import (NAMES, _class_ap, evaluate_detec
 
 
 METRIC_KEYS = ("precision", "recall", "AP50", "mAP50", "mAP50_95", "per_class_ap")
+
+
+class ModelEMA:
+    """Exponential moving average of model parameters and buffers."""
+
+    def __init__(self, model, decay=0.9999):
+        self.ema = deepcopy(model).eval()
+        self.decay = decay
+        self.updates = 0
+        for parameter in self.ema.parameters():
+            parameter.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model):
+        self.updates += 1
+        # Ramp the decay in at the start so the average follows early updates.
+        decay = self.decay * (1 - math.exp(-self.updates / 2000))
+        source = model.state_dict()
+        for name, value in self.ema.state_dict().items():
+            incoming = source[name].detach()
+            if value.is_floating_point():
+                value.mul_(decay).add_(incoming, alpha=1 - decay)
+            else:
+                value.copy_(incoming)
+
+    def state_dict(self):
+        return {"model": self.ema.state_dict(), "updates": self.updates, "decay": self.decay}
+
+    def load_state_dict(self, state):
+        self.ema.load_state_dict(state["model"])
+        self.updates = state.get("updates", 0)
+        self.decay = state.get("decay", self.decay)
+
+
+class WarmupCosineScheduler:
+    """Iteration scheduler with linear warmup followed by cosine decay."""
+
+    def __init__(self, optimizer, total_steps, warmup_steps=0, lrf=0.01, last_step=-1):
+        if total_steps < 1:
+            raise ValueError("total_steps must be positive")
+        self.optimizer = optimizer
+        self.total_steps = total_steps
+        self.warmup_steps = min(max(warmup_steps, 0), total_steps)
+        self.lrf = lrf
+        self.base_lrs = [group.get("initial_lr", group["lr"]) for group in optimizer.param_groups]
+        self.last_step = last_step
+        self._apply(max(last_step + 1, 0))
+
+    def _factor(self, step):
+        if self.warmup_steps and step < self.warmup_steps:
+            return (step + 1) / self.warmup_steps
+        decay_steps = max(self.total_steps - self.warmup_steps, 1)
+        progress = min(max(step - self.warmup_steps, 0) / decay_steps, 1.0)
+        return self.lrf + (1 - self.lrf) * (1 + math.cos(math.pi * progress)) / 2
+
+    def _apply(self, step):
+        factor = self._factor(step)
+        for base_lr, group in zip(self.base_lrs, self.optimizer.param_groups):
+            group["lr"] = base_lr * factor
+
+    def step(self):
+        self.last_step += 1
+        self._apply(self.last_step + 1)
+
+    def state_dict(self):
+        return {"last_step": self.last_step, "total_steps": self.total_steps,
+                "warmup_steps": self.warmup_steps, "lrf": self.lrf, "base_lrs": self.base_lrs}
+
+    def load_state_dict(self, state):
+        self.last_step = state["last_step"]
+        self._apply(self.last_step + 1)
+
+
+def set_backbones_trainable(model, trainable):
+    """Freeze or unfreeze both modality backbones."""
+    for backbone in (model.rgb_backbone, model.ir_backbone):
+        for parameter in backbone.parameters():
+            parameter.requires_grad_(trainable)
+        if not trainable:
+            backbone.eval()
 
 
 def resolve_resume_path(resume, output_dir):
