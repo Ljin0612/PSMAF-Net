@@ -11,8 +11,10 @@ from detection.scripts.psmaf_yolov8_utils import (METRIC_KEYS,
                                                   ModelEMA,
                                                   WarmupCosineScheduler,
                                                   evaluate_yolov8,
+                                                  cuda_memory_metrics,
                                                   resolve_resume_path,
                                                   set_backbones_trainable,
+                                                  strict_device_check,
                                                   yolov8_detection_loss)
 
 
@@ -82,6 +84,17 @@ def test_psmaf_yolov8_forward_and_fusion_shapes():
     features = model.forward_features(rgb, rgb)
     assert [x.shape for x in features] == [(1, 128, 8, 8), (1, 256, 4, 4), (1, 512, 2, 2)]
     assert [x.shape for x in model(rgb, rgb)] == [(1, 70, 8, 8), (1, 70, 4, 4), (1, 70, 2, 2)]
+    debug = model.forward_debug(rgb, rgb)
+    assert set(debug) == {"rgb_features", "ir_features", "fused_features", "outputs"}
+
+
+def test_cpu_memory_and_strict_device_diagnostics_are_safe():
+    model = TinyDualModel()
+    tensor = torch.ones(1, 1)
+    strict_device_check(model, torch.device("cpu"), rgb=tensor, outputs=model(tensor, tensor))
+    assert set(cuda_memory_metrics("cpu")) == {"cuda_allocated_mib", "cuda_reserved_mib",
+                                                "cuda_peak_allocated_mib", "cuda_peak_reserved_mib"}
+    assert not any(cuda_memory_metrics("cpu").values())
 
 
 def test_pretrained_loader_safely_skips_unmatched(tmp_path):
@@ -143,6 +156,7 @@ def test_yolov8_evaluator_writes_matching_diagnostics(tmp_path, monkeypatch):
     assert diagnostics["per_class_tp50"]["people"] == 1
     assert diagnostics["per_class_fp50"]["car"] == 1
     assert diagnostics["per_class_fn50"]["people"] == 0
+    assert set(diagnostics["confidence_quantiles"]) == {"p25", "p50", "p75", "p90", "p95"}
 
 
 def test_yolov8_training_logs_num_pos(tmp_path):

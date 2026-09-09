@@ -24,6 +24,9 @@ def parser():
     p.add_argument("--workers", type=int, default=4); p.add_argument("--project", default="runs/detect"); p.add_argument("--name", default="psmaf-yolov8-eval")
     p.add_argument("--fusion-mode", choices=("psmaf", "add", "concat"), default="psmaf"); p.add_argument("--no-psg", action="store_true"); p.add_argument("--no-msaf", action="store_true")
     p.add_argument("--conf-thres", type=float, default=0.25); p.add_argument("--nms-iou", type=float, default=0.45)
+    p.add_argument("--progress", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--log-interval", type=int, default=20); p.add_argument("--save-vis", type=int, default=0)
+    p.add_argument("--strict-device-check", action="store_true")
     p.add_argument("--debug-num-images", type=int, default=0,
                    help="use only the first N samples for debugging; not for official reporting")
     p.add_argument("--epochs", type=int, default=0, help=argparse.SUPPRESS); p.add_argument("--seed", type=int, default=0, help=argparse.SUPPRESS)
@@ -38,7 +41,10 @@ def main(args=None):
     dataset = limit_dataset(M3FDPairedDataset(root, cfg[args.split], args.imgsz), args.debug_num_images)
     loader = DataLoader(dataset, batch_size=args.batch, num_workers=args.workers, collate_fn=paired_collate_fn)
     output = Path(args.project) / args.name
-    metrics = evaluate_yolov8(model, loader, device, args.conf_thres, args.nms_iou, output / "eval_diagnostics.json")
+    progress = sys.stderr.isatty() if args.progress is None else args.progress
+    metrics = evaluate_yolov8(model, loader, device, args.conf_thres, args.nms_iou,
+                              output / "eval_diagnostics.json", progress, args.log_interval,
+                              args.save_vis, args.strict_device_check)
     save_metrics(metrics, output, "metrics"); print(metrics)
 
 

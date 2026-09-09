@@ -34,6 +34,9 @@ def save_metrics(metrics, output_dir, stem="metrics"):
 
 TRAIN_LOG_FIELDS = ("epoch", "avg_total_loss", "avg_obj_loss", "avg_box_loss", "avg_cls_loss",
                     "num_pos", "learning_rate", "backbone_learning_rate", "base_learning_rate",
+                    "backbone_frozen", "trainable_params", "frozen_params",
+                    "epoch_time_sec", "images_per_sec", "cuda_allocated_mib",
+                    "cuda_reserved_mib", "cuda_peak_allocated_mib", "cuda_peak_reserved_mib",
                     "val_precision", "val_recall", "val_AP50",
                     "val_mAP50_95")
 

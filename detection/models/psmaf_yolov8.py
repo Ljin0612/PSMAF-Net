@@ -136,6 +136,17 @@ class PSMAFYOLOv8(nn.Module):
     def forward(self, rgb, ir):
         return self.neck_head(self.forward_features(rgb, ir))
 
+    def forward_debug(self, rgb, ir):
+        """Return intermediate pyramids for diagnostics without changing forward()."""
+        if rgb.shape != ir.shape:
+            raise ValueError("paired RGB and IR input tensors must have identical shapes")
+        rgb_features = self.rgb_backbone(rgb)
+        ir_features = self.ir_backbone(ir)
+        fused_features = self.fusion(rgb_features, ir_features)
+        outputs = self.neck_head(fused_features)
+        return {"rgb_features": rgb_features, "ir_features": ir_features,
+                "fused_features": fused_features, "outputs": outputs}
+
 
 def _checkpoint_state(checkpoint):
     obj = torch.load(checkpoint, map_location="cpu", weights_only=False)

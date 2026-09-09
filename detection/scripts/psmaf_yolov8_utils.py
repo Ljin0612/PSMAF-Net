@@ -4,8 +4,10 @@ import json
 import math
 from copy import deepcopy
 from pathlib import Path
+import sys
 
 import torch
+from PIL import Image, ImageDraw
 from torch.nn import functional as F
 
 from detection.scripts.psmaf_yolo_utils import (NAMES, _class_ap, evaluate_detection,
@@ -14,6 +16,47 @@ from detection.scripts.psmaf_yolo_utils import (NAMES, _class_ap, evaluate_detec
 
 
 METRIC_KEYS = ("precision", "recall", "AP50", "mAP50", "mAP50_95", "per_class_ap")
+
+
+def cuda_memory_metrics(device):
+    """Return allocator statistics in MiB (safe on CPU-only installations)."""
+    keys = ("cuda_allocated_mib", "cuda_reserved_mib", "cuda_peak_allocated_mib",
+            "cuda_peak_reserved_mib")
+    if torch.device(device).type != "cuda" or not torch.cuda.is_available():
+        return dict.fromkeys(keys, 0.0)
+    mib = 1024 ** 2
+    return dict(zip(keys, (torch.cuda.memory_allocated(device) / mib,
+                            torch.cuda.memory_reserved(device) / mib,
+                            torch.cuda.max_memory_allocated(device) / mib,
+                            torch.cuda.max_memory_reserved(device) / mib)))
+
+
+def tensor_devices(value):
+    """Recursively list tensor devices in a model output."""
+    if torch.is_tensor(value): return [str(value.device)]
+    if isinstance(value, dict): return [d for v in value.values() for d in tensor_devices(v)]
+    if isinstance(value, (tuple, list)): return [d for v in value for d in tensor_devices(v)]
+    return []
+
+
+def strict_device_check(model, device, **tensors):
+    expected = torch.device(device)
+    mismatches = [f"parameter {name}: {p.device}" for name, p in model.named_parameters()
+                  if p.requires_grad and p.device != expected]
+    for name, value in tensors.items():
+        for actual in tensor_devices(value):
+            if torch.device(actual) != expected: mismatches.append(f"{name}: {actual}")
+    if mismatches:
+        raise RuntimeError(f"device check failed (expected {expected}): " + "; ".join(mismatches))
+
+
+def _progress(iterable, enabled, desc, total=None):
+    if not enabled: return iterable
+    try:
+        from tqdm.auto import tqdm
+        return tqdm(iterable, desc=desc, total=total, dynamic_ncols=True, file=sys.stderr)
+    except ImportError:
+        return iterable
 
 
 class ModelEMA:
@@ -169,20 +212,31 @@ def yolov8_detection_loss(outputs, targets, nc=6, strides=(8, 16, 32), reg_max=1
 
 @torch.no_grad()
 def evaluate_yolov8(model, loader, device, confidence_threshold=.25, nms_iou_threshold=.45,
-                    diagnostics_path=None):
+                    diagnostics_path=None, progress=False, log_interval=20, save_vis=0,
+                    strict_device=False):
     model.eval(); predictions, targets = [], []
     decoded_count = filtered_count = nms_count = 0
-    for batch in loader:
-        rgb = batch["rgb"].to(device); labels = batch["labels"].to(device)
-        decoded = decode_yolov8_outputs(model(rgb, batch["ir"].to(device)), rgb.shape[-2:])
+    confidences = []; vis_samples = []
+    iterator = _progress(loader, progress, "validation", len(loader) if hasattr(loader, "__len__") else None)
+    for batch_index, batch in enumerate(iterator):
+        rgb = batch["rgb"].to(device); ir = batch["ir"].to(device); labels = batch["labels"].to(device)
+        outputs = model(rgb, ir)
+        if strict_device: strict_device_check(model, device, rgb=rgb, ir=ir, labels=labels, outputs=outputs)
+        decoded = decode_yolov8_outputs(outputs, rgb.shape[-2:])
         decoded_count += sum(len(x) for x in decoded)
         filtered_count += sum(int((x[:, 4] >= confidence_threshold).sum()) for x in decoded)
         selected = non_max_suppression(decoded, confidence_threshold, nms_iou_threshold)
+        confidences.extend(float(v) for rows in selected for v in rows[:, 4].detach().cpu())
         nms_count += sum(len(x) for x in selected); predictions.extend(selected)
         scale = labels.new_tensor([rgb.shape[-1], rgb.shape[-2], rgb.shape[-1], rgb.shape[-2]])
         for i in range(len(rgb)):
             rows = labels[labels[:, 0] == i]
             targets.append({"boxes": xywh_to_xyxy(rows[:, 2:6] * scale), "classes": rows[:, 1].long()})
+            if len(vis_samples) < save_vis:
+                vis_samples.append((rgb[i].detach().cpu(), targets[-1], selected[i].detach().cpu(),
+                                    batch.get("image_id", [str(len(vis_samples))] * len(rgb))[i]))
+        if hasattr(iterator, "set_postfix") and (batch_index % max(log_interval, 1) == 0):
+            iterator.set_postfix(decoded=decoded_count, after_conf=filtered_count, after_nms=nms_count)
     metrics = evaluate_detection(predictions, targets, NAMES)
     metrics = {key: metrics[key] for key in METRIC_KEYS}
     if diagnostics_path:
@@ -195,13 +249,46 @@ def evaluate_yolov8(model, loader, device, confidence_threshold=.25, nms_iou_thr
         prediction_counts = [sum(int((rows[:, 5].long() == class_id).sum()) for rows in predictions)
                              for class_id in range(len(NAMES))]
         path = Path(diagnostics_path); path.parent.mkdir(parents=True, exist_ok=True)
+        confidence_tensor = torch.tensor(confidences)
+        quantiles = {f"p{p}": (float(torch.quantile(confidence_tensor, p / 100)) if confidences else 0.0)
+                     for p in (25, 50, 75, 90, 95)}
+        precision50 = [tp / max(tp + fp, 1) for tp, fp in zip(tp50, fp50)]
+        recall50 = [tp / max(tp + fn, 1) for tp, fn in zip(tp50, fn50)]
         path.write_text(json.dumps({"decoded_boxes": decoded_count, "boxes_after_confidence": filtered_count,
                                     "boxes_after_nms": nms_count, "images": len(targets),
                                     "gt_boxes": sum(gt_counts), "tp50": sum(tp50),
                                     "fp50": sum(fp50), "fn50": sum(fn50),
+                                    "total_images": len(targets), "total_gt_boxes": sum(gt_counts),
+                                    "total_predictions_before_conf": decoded_count,
+                                    "total_predictions_after_conf": filtered_count,
+                                    "total_predictions_after_nms": nms_count,
+                                    "average_predictions_per_image": nms_count / max(len(targets), 1),
+                                    "average_confidence": sum(confidences) / max(len(confidences), 1),
+                                    "confidence_quantiles": quantiles,
                                     "per_class_gt_counts": dict(zip(NAMES, gt_counts)),
                                     "per_class_prediction_counts": dict(zip(NAMES, prediction_counts)),
                                     "per_class_tp50": dict(zip(NAMES, tp50)),
                                     "per_class_fp50": dict(zip(NAMES, fp50)),
-                                    "per_class_fn50": dict(zip(NAMES, fn50))}, indent=2))
+                                    "per_class_fn50": dict(zip(NAMES, fn50)),
+                                    "per_class_precision50": dict(zip(NAMES, precision50)),
+                                    "per_class_recall50": dict(zip(NAMES, recall50))}, indent=2))
+        if save_vis:
+            _save_visualizations(vis_samples, path.parent / "visualizations")
     return metrics
+
+
+def _save_visualizations(samples, directory):
+    """Render optional RGB validation previews and FP-heavy copies."""
+    directory.mkdir(parents=True, exist_ok=True)
+    fp_dir = directory / "false_positives"; fp_dir.mkdir(exist_ok=True)
+    for index, (tensor, target, prediction, image_id) in enumerate(samples):
+        array = (tensor.clamp(0, 1).permute(1, 2, 0).numpy() * 255).astype("uint8")
+        image = Image.fromarray(array); draw = ImageDraw.Draw(image)
+        for box, cls in zip(target["boxes"].cpu(), target["classes"].cpu()):
+            draw.rectangle(box.tolist(), outline="lime", width=2); draw.text(tuple(box[:2]), f"GT {NAMES[int(cls)]}", fill="lime")
+        for row in prediction:
+            draw.rectangle(row[:4].tolist(), outline="red", width=2)
+            draw.text(tuple(row[:2]), f"{NAMES[int(row[5])]} {row[4]:.2f}", fill="red")
+        filename = f"{index:03d}_{Path(str(image_id)).stem}.jpg"
+        image.save(directory / filename)
+        if len(prediction) > len(target["boxes"]): image.save(fp_dir / filename)
